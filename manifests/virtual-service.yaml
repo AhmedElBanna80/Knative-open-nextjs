@@ -1,0 +1,44 @@
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: next-app-router
+  namespace: default
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - knative-serving/knative-ingress-gateway # Assuming standard Knative setup
+  http:
+
+  - match:
+    - uri:
+        exact: "/"
+    route:
+    - destination:
+        host: next-index.default.svc.cluster.local
+
+
+  - match:
+    - uri:
+        exact: "/_global-error"
+    route:
+    - destination:
+        host: next-_global-error.default.svc.cluster.local
+
+
+  - match:
+    - uri:
+        exact: "/_not-found"
+    route:
+    - destination:
+        host: next-_not-found.default.svc.cluster.local
+
+
+  - match:
+    - uri:
+        exact: "/favicon.ico"
+    route:
+    - destination:
+        host: next-favicon.ico.default.svc.cluster.local
+
