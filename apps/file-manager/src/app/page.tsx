@@ -34,7 +34,7 @@ export default async function Home() {
   const files = await getFiles();
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+    <div className="p-8">
       <div className="max-w-6xl mx-auto">
         <div className="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 p-8">
           <h1 className="text-4xl font-bold text-white mb-2">File Manager</h1>
@@ -55,6 +55,6 @@ export default async function Home() {
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

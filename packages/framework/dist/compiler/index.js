@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const commander_1 = require("commander");
 const path_1 = __importDefault(require("path"));
+const fs_extra_1 = __importDefault(require("fs-extra"));
 const splitter_1 = require("./splitter");
 const generator_1 = require("./generator");
 const validator_1 = require("./validator");
@@ -30,8 +31,16 @@ program
         const groups = await splitter.analyze();
         console.log(`Found ${groups.length} route groups.`);
         groups.forEach(g => console.log(` - ${g.name}: ${g.paths.join(', ')}`));
+        // Load config
+        const configPath = path_1.default.join(projectDir, 'knative-next.config.json');
+        let envConfig = {};
+        if (await fs_extra_1.default.pathExists(configPath)) {
+            console.log(`Loading config from ${configPath}...`);
+            const config = await fs_extra_1.default.readJSON(configPath);
+            envConfig = config.env || {};
+        }
         console.log(`Generating Knative manifests in ${outputDir}...`);
-        const generator = new generator_1.Generator(outputDir, options.image, options.namespace);
+        const generator = new generator_1.Generator(outputDir, options.image, options.namespace, envConfig, options.dir);
         await generator.generate(groups);
         console.log('Done!');
     }

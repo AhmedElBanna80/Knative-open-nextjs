@@ -31,7 +31,8 @@ COPY --chown=nextjs:nodejs .next/static ./.next/static
 COPY --chown=nextjs:nodejs public ./public
 
 # Copy the custom cache handler (compiled)
-COPY --chown=nextjs:nodejs knative-next-framework/dist/runtime/cache-handler.js ./cache-handler.js
+COPY --chown=nextjs:nodejs cache-handler.js ./cache-handler.js
+COPY --chown=nextjs:nodejs runner.js ./runner.js
 
 # Set environment variable to use the cache handler
 # Note: The user's next.config.js must also be configured to read this or use it
@@ -47,4 +48,4 @@ EXPOSE 3000
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
-CMD ["node", "server.js"]
+CMD ["node", "runner.js"]

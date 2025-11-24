@@ -3,7 +3,9 @@ export declare class Generator {
     private outputDir;
     private imageName;
     private namespace;
-    constructor(outputDir: string, imageName: string, namespace?: string);
+    private envConfig;
+    private projectRoot;
+    constructor(outputDir: string, imageName: string, namespace?: string, envConfig?: Record<string, string>, projectRoot?: string);
     generate(groups: RouteGroup[]): Promise<void>;
     private generateServiceYaml;
     private generateVirtualServiceYaml;

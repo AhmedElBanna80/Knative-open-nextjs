@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import path from 'path';
+import fs from 'fs-extra';
 import { Splitter } from './splitter';
 import { Generator } from './generator';
 import { Validator } from './validator';
@@ -31,8 +32,17 @@ program
             console.log(`Found ${groups.length} route groups.`);
             groups.forEach(g => console.log(` - ${g.name}: ${g.paths.join(', ')}`));
 
+            // Load config
+            const configPath = path.join(projectDir, 'knative-next.config.json');
+            let envConfig = {};
+            if (await fs.pathExists(configPath)) {
+                console.log(`Loading config from ${configPath}...`);
+                const config = await fs.readJSON(configPath);
+                envConfig = config.env || {};
+            }
+
             console.log(`Generating Knative manifests in ${outputDir}...`);
-            const generator = new Generator(outputDir, options.image, options.namespace);
+            const generator = new Generator(outputDir, options.image, options.namespace, envConfig, options.dir);
             await generator.generate(groups);
 
             console.log('Done!');

@@ -68,11 +68,24 @@ export class Splitter {
         // Convert /blog/[slug] to blog-slug
         // Convert / to index
         if (page === '/') return 'index';
-        return page
+        
+        let name = page
             .replace(/^\//, '')
             .replace(/\/\[/g, '-')
             .replace(/\]/g, '')
             .replace(/\//g, '-')
             .toLowerCase();
+
+        // Fix for Knative/K8s naming constraints (RFC 1123)
+        // Must consist of lower case alphanumeric characters, '-' or '.', 
+        // and must start and end with an alphanumeric character.
+        
+        // Replace invalid chars (like underscore) with hyphen
+        name = name.replace(/[^a-z0-9-]/g, '-');
+
+        // Remove leading/trailing hyphens
+        name = name.replace(/^-+|-+$/g, '');
+
+        return name;
     }
 }

@@ -56,15 +56,29 @@ deploy-app:
 	npm run build --workspace=packages/framework
 	npm run build --workspace=apps/file-manager
 	@echo "Building Docker image..."
-	docker build -t file-manager:latest -f packages/framework/runtime/Dockerfile apps/file-manager
+	cp packages/framework/dist/runtime/cache-handler.js apps/file-manager/cache-handler.js
+	cp packages/framework/dist/runtime/runner.js apps/file-manager/runner.js
+	docker build --no-cache -t file-manager:latest -f packages/framework/runtime/Dockerfile apps/file-manager
+	docker tag file-manager:latest dev.local/file-manager:latest
+	@if minikube status > /dev/null 2>&1; then \
+		echo "Loading image into Minikube..."; \
+		minikube image rm dev.local/file-manager:latest 2>/dev/null || true; \
+		minikube image load dev.local/file-manager:latest; \
+	fi
+	rm apps/file-manager/cache-handler.js apps/file-manager/runner.js
 	@echo "Generating Knative manifests..."
 	node packages/framework/dist/compiler/index.js \
 		--dir apps/file-manager \
 		--output ./manifests \
-		--image file-manager:latest
+		--image dev.local/file-manager:latest
 	@echo "Deploying to Knative..."
-	kubectl apply -f ./manifests
-	@echo "File Manager deployed!"
+	@if kubectl cluster-info > /dev/null 2>&1; then \
+		kubectl apply -f ./manifests; \
+		echo "File Manager deployed!"; \
+	else \
+		echo "Kubernetes cluster not reachable. Skipping deployment."; \
+		echo "Manifests are generated in ./manifests"; \
+	fi
 
 port-forward:
 	@echo "Starting port-forwards..."
