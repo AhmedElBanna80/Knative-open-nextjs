@@ -4,6 +4,7 @@ import fs from 'fs-extra';
 import { Splitter } from './splitter';
 import { Generator } from './generator';
 import { Validator } from './validator';
+import { Packager } from './packager';
 
 const program = new Command();
 
@@ -42,8 +43,18 @@ program
             }
 
             console.log(`Generating Knative manifests in ${outputDir}...`);
+
+            // Package each group
+            const packager = new Packager(projectDir, outputDir, options.image);
+            const groupImages: Record<string, string> = {};
+
+            for (const group of groups) {
+                const imageName = await packager.package(group);
+                groupImages[group.name] = imageName;
+            }
+
             const generator = new Generator(outputDir, options.image, options.namespace, envConfig, options.dir);
-            await generator.generate(groups);
+            await generator.generate(groups, groupImages);
 
             console.log('Done!');
         } catch (error) {

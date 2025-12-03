@@ -4,12 +4,15 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "lint": "eslint .",
+    "isolate": "npx ts-node scripts/isolate.ts",
+    "deploy-all": "npx ts-node scripts/deploy-all.ts",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
-    "turbo": "latest",
-    "prettier": "^3.0.0"
+    "minio": "^8.0.6",
+    "prettier": "^3.0.0",
+    "turbo": "latest"
   },
   "workspaces": [
     "apps/*",

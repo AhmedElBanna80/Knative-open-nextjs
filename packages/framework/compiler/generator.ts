@@ -26,12 +26,13 @@ export class Generator {
     };
   }
 
-  async generate(groups: RouteGroup[]) {
+  async generate(groups: RouteGroup[], groupImages: Record<string, string>) {
     await fs.ensureDir(this.outputDir);
 
     // 1. Generate Knative Services
     for (const group of groups) {
-      const serviceYaml = this.generateServiceYaml(group);
+      const imageName = groupImages[group.name] || this.imageName; // Fallback to default if not found (shouldn't happen)
+      const serviceYaml = this.generateServiceYaml(group, imageName);
       await fs.writeFile(path.join(this.outputDir, `service-${group.name}.yaml`), serviceYaml);
     }
 
@@ -40,7 +41,7 @@ export class Generator {
     await fs.writeFile(path.join(this.outputDir, 'virtual-service.yaml'), vsYaml);
   }
 
-  private generateServiceYaml(group: RouteGroup): string {
+  private generateServiceYaml(group: RouteGroup, imageName: string): string {
     const envVars = Object.entries(this.envConfig).map(([key, value]) => `            - name: ${key}
               value: "${value}"`).join('\n');
 
@@ -63,7 +64,7 @@ spec:
         serving.knative.dev/digestResolution: "skipped"
     spec:
       containers:
-        - image: ${this.imageName}
+        - image: ${imageName}
           imagePullPolicy: Never
           env:
             - name: NEXT_HANDLER_PATH
@@ -87,17 +88,17 @@ ${envVars}
           // Convert Next.js dynamic route /blog/[slug] to regex /blog/[^/]+
           // Handle catch-all [...slug] -> .*
           let regex = p;
-          
+
           // Handle catch-all [...param]
           regex = regex.replace(/\/\[\.\.\..*?\]/g, '/.*');
-          
+
           // Handle single param [param]
           regex = regex.replace(/\/\[.*?\]/g, '/[^/]+');
 
           // Ensure start anchor, and if it doesn't end with .*, ensure end anchor (or handle subpaths?)
           // Next.js routes are exact matches unless catch-all.
           // But /blog/[slug] should match /blog/foo but NOT /blog/foo/bar
-          
+
           regex = '^' + regex + '$';
 
           return `    - uri:
