@@ -84,3 +84,4 @@ describe('patchManifestJs', () => {
     expect(result).toContain('static/chunks/webpack.js');
   });
 });
+

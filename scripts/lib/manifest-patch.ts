@@ -42,3 +42,4 @@ export function patchManifestJs(content: string): string | null {
     return null;
   }
 }
+

@@ -27,3 +27,4 @@ export function buildGroupImageName(baseImageName: string, groupName: string): s
   const { base, tag } = parseImageName(baseImageName);
   return tag ? `${base}-${groupName}:${tag}` : `${base}-${groupName}`;
 }
+

@@ -49,3 +49,4 @@ describe('toDns1123Label', () => {
     expect(toDns1123Label('a/b/c')).toBe('a-b-c');
   });
 });
+

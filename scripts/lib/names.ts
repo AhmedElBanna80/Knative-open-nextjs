@@ -11,3 +11,4 @@ export function toDns1123Label(input: string): string {
   const trimmed = replaced.replace(/^-+/, '').replace(/-+$/, '');
   return trimmed.slice(0, 63) || 'default';
 }
+

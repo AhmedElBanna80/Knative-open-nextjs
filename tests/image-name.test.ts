@@ -83,3 +83,4 @@ describe('buildGroupImageName', () => {
     expect(buildGroupImageName('myrepo/app:v1', 'user-api')).toBe('myrepo/app-user-api:v1');
   });
 });
+
