@@ -1,0 +1,22 @@
+export async function register() {
+    console.log('Registering OpenTelemetry... Runtime:', process.env.NEXT_RUNTIME);
+
+    // Check if we are in Node.js environment (avoiding edge issues if any, but logging first)
+    // if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { NodeSDK } = await import('@opentelemetry/sdk-node');
+    const { ConsoleSpanExporter } = await import('@opentelemetry/sdk-trace-node');
+    const { resourceFromAttributes } = await import('@opentelemetry/resources');
+    const { SEMRESATTRS_SERVICE_NAME } = await import('@opentelemetry/semantic-conventions');
+
+    const sdk = new NodeSDK({
+        resource: resourceFromAttributes({
+            [SEMRESATTRS_SERVICE_NAME]: 'file-manager',
+        }),
+        // Use Console Exporter for debugging first
+        traceExporter: new ConsoleSpanExporter(),
+    });
+
+    sdk.start();
+    console.log('OpenTelemetry initialized.');
+    // }
+}

@@ -36,3 +36,4 @@ yarn-error.log*
 
 # Generated Manifests (if they are artifacts)
 manifests/
+packages/knative-next-builder/dist-deploy
