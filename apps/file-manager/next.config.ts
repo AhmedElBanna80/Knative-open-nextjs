@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
-  assetPrefix: 'http://localhost:9000/knative-assets/file-manager',
+  assetPrefix: process.env.ASSET_PREFIX,
   // cacheComponents disabled for now due to conflict with dynamic routes
   experimental: {
     instrumentationHook: false,

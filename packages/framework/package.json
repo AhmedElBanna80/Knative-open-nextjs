@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:go-builder": "make -C ../knative-next-builder build",
+    "dev": "tsc -w && node dist/compiler/index.js",
     "start": "node dist/compiler/index.js"
   },
   "dependencies": {

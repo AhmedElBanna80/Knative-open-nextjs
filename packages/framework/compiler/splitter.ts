@@ -40,28 +40,24 @@ export class Splitter {
     const manifest: RoutesManifest = await fs.readJSON(manifestPath);
     const groups: RouteGroup[] = [];
 
-    // Strategy: One service per page (granular splitting)
-    // In a real app, we might want to group some (e.g. /blog/*)
+    // Force Monolith
+    const allPaths: string[] = [];
+    const allRegex: string[] = [];
 
-    // Process Static Routes
     for (const route of manifest.staticRoutes) {
-      groups.push({
-        name: this.sanitizeName(route.page),
-        paths: [route.page],
-        regex: [route.regex],
-      });
+      allPaths.push(route.page);
+      allRegex.push(route.regex);
     }
-
-    // Process Dynamic Routes
     for (const route of manifest.dynamicRoutes) {
-      groups.push({
-        name: this.sanitizeName(route.page),
-        paths: [route.page], // This is the pattern, e.g., /blog/[slug]
-        regex: [route.regex],
-      });
+      allPaths.push(route.page);
+      allRegex.push(route.regex);
     }
 
-    return groups;
+    return [{
+      name: 'index',
+      paths: allPaths,
+      regex: allRegex,
+    }];
   }
 
   private sanitizeName(page: string): string {

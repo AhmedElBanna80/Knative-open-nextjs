@@ -45,7 +45,6 @@ const getCerbosClient = () => {
     if (!cerbosClient) {
         const target = process.env.CERBOS_URL || 'cerbos.default.svc.cluster.local:3593';
         cerbosClient = new grpc_1.GRPC(target, { tls: false });
-        console.log(`Connected to Cerbos at ${target}`);
     }
     return cerbosClient;
 };
@@ -54,12 +53,11 @@ const getMinioClient = () => {
     if (!minioClient) {
         minioClient = new Minio.Client({
             endPoint: process.env.MINIO_ENDPOINT || 'minio.default.svc.cluster.local',
-            port: parseInt(process.env.MINIO_PORT || '9000'),
+            port: Number.parseInt(process.env.MINIO_PORT || '9000'),
             useSSL: process.env.MINIO_USE_SSL === 'true',
             accessKey: process.env.MINIO_ACCESS_KEY || 'minio',
             secretKey: process.env.MINIO_SECRET_KEY || 'minio123',
         });
-        console.log('Connected to MinIO');
     }
     return minioClient;
 };
@@ -69,7 +67,6 @@ const getDbPool = () => {
         pgPool = new pg_1.Pool({
             connectionString: process.env.DATABASE_URL,
         });
-        console.log('Connected to Postgres');
     }
     return pgPool;
 };

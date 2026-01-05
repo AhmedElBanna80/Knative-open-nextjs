@@ -17,7 +17,7 @@ spec:
         serving.knative.dev/digestResolution: "skipped"
     spec:
       containers:
-        - image: dev.local/file-manager:latest
+        - image: dev.local/file-manager-dashboard:latest
           imagePullPolicy: Never
           env:
             - name: NEXT_HANDLER_PATH
@@ -29,7 +29,7 @@ spec:
             - name: MINIO_ENDPOINT
               value: "minio.default.svc.cluster.local"
             - name: MINIO_PORT
-              value: "9000"
+              value: "80"
             - name: MINIO_USE_SSL
               value: "false"
             - name: DATABASE_URL

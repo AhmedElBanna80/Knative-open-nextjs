@@ -3,11 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const node_path_1 = __importDefault(require("node:path"));
 const commander_1 = require("commander");
-const path_1 = __importDefault(require("path"));
 const fs_extra_1 = __importDefault(require("fs-extra"));
-const splitter_1 = require("./splitter");
 const generator_1 = require("./generator");
+const packager_1 = require("./packager");
+const splitter_1 = require("./splitter");
 const validator_1 = require("./validator");
 const program = new commander_1.Command();
 program
@@ -20,29 +21,29 @@ program
     .option('-n, --namespace <namespace>', 'Kubernetes namespace', 'default')
     .action(async (options) => {
     try {
-        const projectDir = path_1.default.resolve(options.dir);
-        const nextDir = path_1.default.resolve(projectDir, '.next');
-        const outputDir = path_1.default.resolve(options.output);
-        console.log(`Validating Next.js project at ${projectDir}...`);
+        const projectDir = node_path_1.default.resolve(options.dir);
+        const nextDir = node_path_1.default.resolve(projectDir, '.next');
+        const outputDir = node_path_1.default.resolve(options.output);
         const validator = new validator_1.Validator(projectDir);
         await validator.validate();
-        console.log(`Analyzing Next.js build at ${nextDir}...`);
         const splitter = new splitter_1.Splitter(nextDir);
         const groups = await splitter.analyze();
-        console.log(`Found ${groups.length} route groups.`);
-        groups.forEach(g => console.log(` - ${g.name}: ${g.paths.join(', ')}`));
         // Load config
-        const configPath = path_1.default.join(projectDir, 'knative-next.config.json');
+        const configPath = node_path_1.default.join(projectDir, 'knative-next.config.json');
         let envConfig = {};
         if (await fs_extra_1.default.pathExists(configPath)) {
-            console.log(`Loading config from ${configPath}...`);
             const config = await fs_extra_1.default.readJSON(configPath);
             envConfig = config.env || {};
         }
-        console.log(`Generating Knative manifests in ${outputDir}...`);
+        // Package each group
+        const packager = new packager_1.Packager(projectDir, outputDir, options.image);
+        const groupImages = {};
+        for (const group of groups) {
+            const imageName = await packager.package(group);
+            groupImages[group.name] = imageName;
+        }
         const generator = new generator_1.Generator(outputDir, options.image, options.namespace, envConfig, options.dir);
-        await generator.generate(groups);
-        console.log('Done!');
+        await generator.generate(groups, groupImages);
     }
     catch (error) {
         console.error('Error:', error);

@@ -4,8 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Generator = void 0;
+const node_path_1 = __importDefault(require("node:path"));
 const fs_extra_1 = __importDefault(require("fs-extra"));
-const path_1 = __importDefault(require("path"));
 class Generator {
     constructor(outputDir, imageName, namespace = 'default', envConfig = {}, projectRoot = '.') {
         this.outputDir = outputDir;
@@ -13,30 +13,39 @@ class Generator {
         this.namespace = namespace;
         this.projectRoot = projectRoot;
         this.envConfig = {
-            CERBOS_URL: "cerbos.default.svc.cluster.local:3593",
-            MINIO_ENDPOINT: "minio.default.svc.cluster.local",
-            MINIO_PORT: "9000",
-            MINIO_USE_SSL: "false",
-            DATABASE_URL: "postgresql://neondb_owner:password@postgres-postgresql.default.svc.cluster.local:5432/neondb?sslmode=disable",
-            MINIO_ACCESS_KEY: "minio",
-            MINIO_SECRET_KEY: "minio123",
-            ...envConfig
+            CERBOS_URL: 'cerbos.default.svc.cluster.local:3593',
+            MINIO_ENDPOINT: 'minio.default.svc.cluster.local',
+            MINIO_PORT: '9000',
+            MINIO_USE_SSL: 'false',
+            // Prefer explicitly provided envConfig (or environment variables) for sensitive values.
+            DATABASE_URL: '',
+            MINIO_ACCESS_KEY: '',
+            MINIO_SECRET_KEY: '',
+            ...envConfig,
         };
     }
-    async generate(groups) {
+    async generate(groups, groupImages) {
         await fs_extra_1.default.ensureDir(this.outputDir);
         // 1. Generate Knative Services
         for (const group of groups) {
-            const serviceYaml = this.generateServiceYaml(group);
-            await fs_extra_1.default.writeFile(path_1.default.join(this.outputDir, `service-${group.name}.yaml`), serviceYaml);
+            const explicitImageName = groupImages[group.name];
+            if (!explicitImageName) {
+                console.warn(`Generator: No image specified for route group "${group.name}" in groupImages; falling back to default image "${this.imageName}".`);
+            }
+            const effectiveImageName = explicitImageName || this.imageName;
+            const serviceYaml = this.generateServiceYaml(group, effectiveImageName);
+            await fs_extra_1.default.writeFile(node_path_1.default.join(this.outputDir, `service-${group.name}.yaml`), serviceYaml);
         }
         // 2. Generate VirtualService (Routing)
         const vsYaml = this.generateVirtualServiceYaml(groups);
-        await fs_extra_1.default.writeFile(path_1.default.join(this.outputDir, 'virtual-service.yaml'), vsYaml);
+        await fs_extra_1.default.writeFile(node_path_1.default.join(this.outputDir, 'virtual-service.yaml'), vsYaml);
     }
-    generateServiceYaml(group) {
-        const envVars = Object.entries(this.envConfig).map(([key, value]) => `            - name: ${key}
-              value: "${value}"`).join('\n');
+    generateServiceYaml(group, imageName) {
+        const envVars = Object.entries(this.envConfig)
+            .filter(([, value]) => value !== '')
+            .map(([key, value]) => `            - name: ${key}
+              value: "${value}"`)
+            .join('\n');
         return `
 apiVersion: serving.knative.dev/v1
 kind: Service
@@ -56,7 +65,7 @@ spec:
         serving.knative.dev/digestResolution: "skipped"
     spec:
       containers:
-        - image: ${this.imageName}
+        - image: ${imageName}
           imagePullPolicy: Never
           env:
             - name: NEXT_HANDLER_PATH
@@ -69,11 +78,13 @@ ${envVars}
 `;
     }
     generateVirtualServiceYaml(groups) {
-        const routes = groups.map(group => {
+        const routes = groups
+            .map((group) => {
             // Simple path matching. For regex/dynamic routes, Istio supports regex.
             // Next.js regex needs to be converted to Istio regex if complex.
             // For now, we use exact match for static and prefix/regex for dynamic.
-            const matchers = group.paths.map(p => {
+            const matchers = group.paths
+                .map((p) => {
                 if (p.includes('[')) {
                     // Convert Next.js dynamic route /blog/[slug] to regex /blog/[^/]+
                     // Handle catch-all [...slug] -> .*
@@ -85,15 +96,14 @@ ${envVars}
                     // Ensure start anchor, and if it doesn't end with .*, ensure end anchor (or handle subpaths?)
                     // Next.js routes are exact matches unless catch-all.
                     // But /blog/[slug] should match /blog/foo but NOT /blog/foo/bar
-                    regex = '^' + regex + '$';
+                    regex = `^${regex}$`;
                     return `    - uri:
         regex: "${regex}"`;
                 }
-                else {
-                    return `    - uri:
+                return `    - uri:
         exact: "${p}"`;
-                }
-            }).join('\n');
+            })
+                .join('\n');
             return `
   - match:
 ${matchers}
@@ -103,7 +113,8 @@ ${matchers}
     - destination:
         host: next-${group.name}.${this.namespace}.svc.cluster.local
 `;
-        }).join('\n');
+        })
+            .join('\n');
         return `
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService

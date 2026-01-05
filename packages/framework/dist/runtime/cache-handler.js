@@ -36,10 +36,6 @@ class RedisCacheHandler {
             console.error('Cache set error:', error);
         }
     }
-    async revalidateTag(tag) {
-        // Implementation for tag-based revalidation would go here
-        // Typically involves maintaining a set of keys per tag
-        console.log(`Revalidating tag: ${tag}`);
-    }
+    async revalidateTag(_tag) { }
 }
 exports.default = RedisCacheHandler;
