@@ -81,10 +81,15 @@ export class Packager {
         console.warn("Could not find server.js in standalone build", e);
       }
 
+      // Determine the directory containing server.js to place assets correctly
+      const serverJsDir = path.dirname(serverJsPath);
+      const destDir = path.join(buildDir, serverJsDir);
+
       // Copy static assets for standalone
       const staticSrc = path.join(this.nextDir, 'static');
-      const staticDest = path.join(buildDir, '.next', 'static');
-      await fs.ensureDir(path.join(buildDir, '.next'));
+      // Place .next/static relative to server.js
+      const staticDest = path.join(destDir, '.next', 'static');
+      await fs.ensureDir(path.join(destDir, '.next'));
       try {
         await execAsync(`cp -R "${staticSrc}" "${staticDest}"`);
       } catch (e) {
@@ -93,7 +98,8 @@ export class Packager {
 
       const publicSrc = path.join(this.projectDir, 'public');
       if (await fs.pathExists(publicSrc)) {
-        await execAsync(`cp -R "${publicSrc}" "${path.join(buildDir, 'public')}"`);
+        // Place public relative to server.js
+        await execAsync(`cp -R "${publicSrc}" "${path.join(destDir, 'public')}"`);
       }
 
       // Explicitly copy instrumentation.js if it exists in .next/server
