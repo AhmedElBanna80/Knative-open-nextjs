@@ -9,6 +9,7 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/target: "100"
+        force-update: "1767614434"
     spec:
       containers:
         - image: us-central1-docker.pkg.dev/gsw-mcp/knative-next-repo/file-manager:latest
@@ -26,7 +27,7 @@ spec:
             - name: MINIO_USE_SSL
               value: "false"
             - name: DATABASE_URL
-              value: "postgresql://neondb_owner:password@postgres.default.svc.cluster.local:5432/neondb?sslmode=disable"
+              value: "postgresql://postgres:password@postgres.default.svc.cluster.local:5432/filemanager?sslmode=disable"
             - name: MINIO_ACCESS_KEY
               value: "minio"
             - name: MINIO_SECRET_KEY

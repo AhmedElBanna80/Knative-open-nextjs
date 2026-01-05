@@ -37,3 +37,35 @@ yarn-error.log*
 # Generated Manifests (if they are artifacts)
 manifests/
 packages/knative-next-builder/dist-deploy
+
+# Logs
+build.log
+
+# MinIO Client Binary
+
+# Go Test Coverage
+coverage.out
+
+# Go Builder Binary
+packages/knative-next-builder/cmd/builder/builder
+
+# Bun Temporary Artifacts
+*.bun-build
+
+# MinIO Client
+mc
+
+# Generated Standalone Server
+apps/file-manager/server.js
+
+# Builder Binaries
+packages/knative-next-builder/bin/
+
+# Local Config
+apps/dashboard/bunfig.toml
+
+# Temporary Analysis
+deployment_failure_analysis.md
+
+# Lockfiles (Untracked)
+package-lock.json

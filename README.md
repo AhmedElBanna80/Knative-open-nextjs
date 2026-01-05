@@ -38,8 +38,8 @@ kubectl apply -f packages/framework/infrastructure/cerbos/
 # Deploy MinIO
 kubectl apply -f packages/framework/infrastructure/minio/
 
-# Deploy Neon
-kubectl apply -f packages/framework/infrastructure/neon/
+# Deploy Postgres
+kubectl apply -f packages/framework/infrastructure/postgres/
 ```
 
 ### 4. Build the File Manager App
@@ -70,7 +70,8 @@ kubectl apply -f ./manifests
 - ✅ **Fluid Compute**: High concurrency, scale-to-zero
 - ✅ **Authorization**: Cerbos integration
 - ✅ **Storage**: MinIO S3-compatible object storage
-- ✅ **Database**: Self-hosted Neon Postgres
+- ✅ **Database**: Self-hosted Postgres
+
 - ✅ **Monorepo**: Turborepo for efficient builds
 
 ## File Manager App
@@ -90,4 +91,41 @@ npm run dev --workspace=apps/file-manager
 
 # Build all packages
 npm run build
+```
+
+## Advanced Builder (Bun + Bytecode)
+
+For production deployments, we use a custom Go-based builder that leverages Bun to compile Next.js applications into single-file executables with **bytecode optimization**.
+
+### Features
+- **Bytecode Compilation**: Protections source code and improves startup time.
+- **Cross-Platform**: Build locally on macOS (ARM64) for GKE (Linux/AMD64).
+- **Zero-Dependency**: The final artifact is a single binary (plus assets).
+
+### Usage
+
+**Build for Local (macOS ARM64):**
+```bash
+# From packages/knative-next-builder
+go run cmd/builder/main.go \
+  -dir ../../apps/file-manager \
+  -output dist-deploy \
+  -target bun-darwin-arm64
+```
+
+**Build for Local (macOS AMD64):**
+```bash
+go run cmd/builder/main.go \
+  -dir ../../apps/file-manager \
+  -output dist-deploy \
+  -target bun-darwin-x64
+```
+
+**Build for GKE (Linux AMD64):**
+```bash
+# Used by Cloud Build / Deploy Scripts
+go run cmd/builder/main.go \
+  -dir ../../apps/file-manager \
+  -output dist-deploy \
+  -target bun-linux-x64
 ```
