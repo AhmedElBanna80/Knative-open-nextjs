@@ -68,38 +68,46 @@ export class Packager {
       // We can use 'find' inside buildDir to locate it? Or just assume one?
       // For this POC, let's find it.
       try {
+        console.error('Searching for server.js in ' + buildDir);
         const { stdout } = await execAsync(`find . -name server.js`, { cwd: buildDir });
+        console.error('Find output:', stdout);
         const lines = stdout.trim().split('\n');
-        // Use the first one that looks like a main server.js (not in node_modules)
-        for (const line of lines) {
-          if (!line.includes('node_modules')) {
-            serverJsPath = line.replace(/^\.\//, ''); // remove ./
-            break;
-          }
+        const validLines = lines.filter(l => l && !l.includes('node_modules'));
+        if (validLines.length > 0) {
+          serverJsPath = validLines[0].replace(/^\.\//, '');
+          console.error(`Found server.js at ${serverJsPath}`);
+        } else {
+          console.error('No valid server.js found excluding node_modules');
         }
       } catch (e) {
-        console.warn("Could not find server.js in standalone build", e);
+        console.error('Failed to search for server.js', e);
       }
 
-      // Determine the directory containing server.js to place assets correctly
+      if (!serverJsPath) {
+        throw new Error('Could not locate server.js in standalone build. Cannot determine asset destination.');
+      }
+
       const serverJsDir = path.dirname(serverJsPath);
       const destDir = path.join(buildDir, serverJsDir);
+      console.error(`Destination directory detected: ${destDir}`);
 
       // Copy static assets for standalone
       const staticSrc = path.join(this.nextDir, 'static');
-      // Place .next/static relative to server.js
       const staticDest = path.join(destDir, '.next', 'static');
-      await fs.ensureDir(path.join(destDir, '.next'));
+
       try {
-        await execAsync(`cp -R "${staticSrc}" "${staticDest}"`);
+        console.log(`Ensuring deep .next exists at ${path.join(destDir, '.next')}`);
+        await fs.ensureDir(path.join(destDir, '.next'));
+        console.log(`Copying static assets from ${staticSrc} to ${staticDest}`);
+        await fs.copy(staticSrc, staticDest);
       } catch (e) {
         console.warn('Failed to copy .next/static', e);
       }
 
       const publicSrc = path.join(this.projectDir, 'public');
       if (await fs.pathExists(publicSrc)) {
-        // Place public relative to server.js
-        await execAsync(`cp -R "${publicSrc}" "${path.join(destDir, 'public')}"`);
+        // Place public relative to .next parent
+        await fs.copy(publicSrc, path.join(destDir, 'public'));
       }
 
       // Explicitly copy instrumentation.js if it exists in .next/server
