@@ -14,7 +14,7 @@ const nextConfig = {
     MINIO_ENDPOINT: "minio.default.svc.cluster.local",
     MINIO_PORT: "80",
     MINIO_USE_SSL: "false",
-    DATABASE_URL: "postgresql://neondb_owner:password@postgres-postgresql.default.svc.cluster.local:5432/neondb?sslmode=disable",
+    DATABASE_URL: "postgresql://neondb_owner:password@postgres.default.svc.cluster.local:5432/neondb?sslmode=disable",
     MINIO_ACCESS_KEY: "minio",
     MINIO_SECRET_KEY: "minio123"
   }
