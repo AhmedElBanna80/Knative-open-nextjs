@@ -59,13 +59,17 @@ mc
 apps/file-manager/server.js
 
 # Builder Binaries
+# Builder Binaries
 packages/knative-next-builder/bin/
+packages/knative-next-builder/dist-deploy/
+packages/knative-next-builder/dist-deploy-amd64/
+packages/knative-next-builder/build_log.txt
 
 # Local Config
 apps/dashboard/bunfig.toml
 
 # Temporary Analysis
-deployment_failure_analysis.md
+# Bun temporary artifacts
 
 # Lockfiles (Untracked)
 package-lock.json

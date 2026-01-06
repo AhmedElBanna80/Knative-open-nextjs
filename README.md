@@ -98,9 +98,15 @@ npm run build
 For production deployments, we use a custom Go-based builder that leverages Bun to compile Next.js applications into single-file executables with **bytecode optimization**.
 
 ### Features
-- **Bytecode Compilation**: Protections source code and improves startup time.
+- **Bytecode Compilation**: Protects source code and improves startup time (<100ms).
+- **Distroless Runtime**: Uses `gcr.io/distroless/cc-debian12` for a minimal, secure footprint.
+- **Optimized Size**: Docker images reduced to **~222MB** (from >500MB) via:
+    - **NFT Tracing**: Only includes used dependencies.
+    - **Auto-Shimming**: Automatically fixes Bun resolution for external modules.
+    - **Aggressive Pruning**: Removes unused platform binaries and dev artifacts.
 - **Cross-Platform**: Build locally on macOS (ARM64) for GKE (Linux/AMD64).
-- **Zero-Dependency**: The final artifact is a single binary (plus assets).
+
+See [packages/knative-next-builder/README.md](./packages/knative-next-builder/README.md) for full architecture details.
 
 ### Usage
 

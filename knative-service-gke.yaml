@@ -9,7 +9,7 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/target: "100"
-        force-update: "1767614434"
+        force-update: "1767703440"
     spec:
       containers:
         - image: us-central1-docker.pkg.dev/gsw-mcp/knative-next-repo/file-manager:latest

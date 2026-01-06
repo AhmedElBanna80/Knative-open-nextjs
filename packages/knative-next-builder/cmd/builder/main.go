@@ -89,22 +89,27 @@ func Run(args []string) error {
 	// Calculate relative app dir by finding server.js in the output
 	// Standalone output structure varies (sometimes strips /Users/foo, sometimes not)
 	var relativeAppDir string
+	errFound := fmt.Errorf("found")
 	err = filepath.Walk(absOutputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+		// Ignore node_modules
+		if strings.Contains(path, "node_modules") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		
 		if info.Name() == "server.js" {
 			// Found it! Get path relative to absOutputDir
 			rel, err := filepath.Rel(absOutputDir, filepath.Dir(path))
 			if err != nil {
 				return err
 			}
-			// Skip node_modules paths if they happen to have server.js (unlikely to be the main one unique)
-			// The main one should be deep in the folder structure matching project name
-			if !strings.Contains(rel, "node_modules") {
-				relativeAppDir = rel
-				return filepath.SkipDir // Stop searching
-			}
+			relativeAppDir = rel
+			return errFound // Stop searching globally
 		}
 		return nil
 	})
@@ -124,6 +129,17 @@ func Run(args []string) error {
 	fmt.Println("Shimming Next.js internal dependencies...")
 	if err := runner.ShimReactServerDom(absProjectDir, absOutputDir); err != nil {
 		log.Printf("Warning: Shim failed: %v", err)
+	}
+	if err := runner.ShimRuntimeModules(absProjectDir, absOutputDir); err != nil {
+		log.Printf("Warning: Runtime Shim failed: %v", err)
+	}
+	if err := runner.PatchNextInternals(absOutputDir); err != nil {
+		log.Printf("Warning: PatchNextInternals failed: %v", err)
+	}
+	
+	// 3.6 Prune Unnecessary Files
+	if err := runner.PruneNodeModules(absOutputDir); err != nil {
+		log.Printf("Warning: Pruning failed: %v", err)
 	}
 
 	// 4. Output Entry Point

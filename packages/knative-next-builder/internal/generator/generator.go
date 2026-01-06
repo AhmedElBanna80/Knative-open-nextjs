@@ -58,6 +58,24 @@ console.log('Hostname:', hostname);
 console.log('Port:', port);
 console.log('Directory:', dir);
 
+// Debug: Check if .next exists and is readable
+try {
+  const fs = require('fs');
+  if (fs.existsSync(dir)) {
+     console.log('Contents of dir:', fs.readdirSync(dir));
+     const nextDir = path.join(dir, '.next');
+     if (fs.existsSync(nextDir)) {
+       console.log('Contents of .next:', fs.readdirSync(nextDir));
+     } else {
+       console.error('.next directory missing at:', nextDir);
+     }
+  } else {
+     console.error('App directory missing:', dir);
+  }
+} catch (e) {
+  console.error('Debug Check Failed:', e);
+}
+
 // Use require to bypass potential ESM export restrictions in Next.js packages
 const { startServer } = require('next/dist/server/lib/start-server');
 
@@ -127,6 +145,8 @@ func GeneratePackageJSON(outputDir string) error {
 			"react": "^19.0.0",
 			"react-dom": "^19.0.0",
 			"sharp": "^0.33.2",
+			"@swc/helpers": "^0.5.0",
+			"styled-jsx": "^5.1.1",
 		},
 	}
 	
