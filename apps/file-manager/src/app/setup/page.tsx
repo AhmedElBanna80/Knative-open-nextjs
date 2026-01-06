@@ -1,4 +1,4 @@
-import { getDbPool } from '@knative-next/framework';
+import { getDbPool } from '@knative-next/lib';
 
 export const dynamic = 'force-dynamic';
 

@@ -10,9 +10,7 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "ci": "biome check . && vitest run --coverage",
-    "isolate": "npx ts-node scripts/isolate.ts",
-    "deploy-all": "npx ts-node scripts/deploy-all.ts"
+    "ci": "biome check . && vitest run --coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
@@ -26,5 +24,8 @@
     "turbo": "latest",
     "vitest": "^4.0.16"
   },
-  "workspaces": ["apps/*", "packages/*"]
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
 }

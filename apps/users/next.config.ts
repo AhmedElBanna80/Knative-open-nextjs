@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   basePath: '/users',
   assetPrefix: '/users-static',
-  transpilePackages: ['@knative-next/ui', '@knative-next/framework'],
+  transpilePackages: ['@knative-next/ui', '@knative-next/lib'],
   experimental: {
     turbo: {
       rules: {

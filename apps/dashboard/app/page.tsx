@@ -1,4 +1,4 @@
-import { getDbPool } from '@knative-next/framework';
+import { getDbPool } from '@knative-next/lib';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@knative-next/ui';
 
 export const dynamic = 'force-dynamic';

@@ -1,6 +1,6 @@
 import FileList from '@/components/FileList';
 import UploadForm from '@/components/UploadForm';
-import { getMinioClient } from '@knative-next/framework';
+import { getMinioClient } from '@knative-next/lib';
 import { Suspense } from 'react';
 
 // Force dynamic rendering to avoid prerendering issues with external services

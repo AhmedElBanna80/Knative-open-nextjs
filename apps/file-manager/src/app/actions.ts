@@ -1,6 +1,6 @@
 'use server';
 
-import { getDbPool, getMinioClient } from '@knative-next/framework';
+import { getDbPool, getMinioClient } from '@knative-next/lib';
 import { revalidatePath } from 'next/cache';
 
 export async function uploadFile(formData: FormData) {

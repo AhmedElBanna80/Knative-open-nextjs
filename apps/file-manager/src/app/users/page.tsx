@@ -1,4 +1,4 @@
-import { getDbPool } from '@knative-next/framework';
+import { getDbPool } from '@knative-next/lib';
 import { revalidatePath } from 'next/cache';
 
 export const dynamic = 'force-dynamic';
