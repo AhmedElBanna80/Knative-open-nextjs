@@ -13,6 +13,7 @@ out/
 # Production
 build/
 dist/
+dist-isolated/
 
 # Misc
 .DS_Store
@@ -36,6 +37,7 @@ yarn-error.log*
 
 # Generated Manifests (if they are artifacts)
 manifests/
+*-prototype.yaml
 packages/knative-next-builder/dist-deploy
 
 # Logs
@@ -63,6 +65,7 @@ apps/file-manager/server.js
 packages/knative-next-builder/bin/
 packages/knative-next-builder/dist-deploy/
 packages/knative-next-builder/dist-deploy-amd64/
+packages/knative-next-builder/dist-deploy-alpine/
 packages/knative-next-builder/build_log.txt
 
 # Local Config
