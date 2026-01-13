@@ -50,8 +50,44 @@ func (o *Orchestrator) Run(cfg Config) error {
 		return fmt.Errorf("NFT parse failed: %w", err)
 	}
 
+	// 1a. Normalize Paths
+	// NFT files are relative to the NFT file itself. We need them relative to SrcDir (Root).
+	var normalizedFiles []string
+	nftDir := filepath.Dir(nftPath)
+	
+	for _, f := range files {
+		// Absolute path of the dependency
+		absPath := filepath.Join(nftDir, f)
+		
+		// Relative path from Root (SrcDir)
+		relPath, err := filepath.Rel(cfg.SrcDir, absPath)
+		if err != nil {
+			// If we can't make it relative to root (e.g. outside repo), we might skip or fail.
+			// For now, let's skip external files or try to copy them?
+			// Ideally they should be inside the repo or node_modules.
+			fmt.Printf("Warning: Skipping file outside root context: %s\n", absPath)
+			continue 
+		}
+		
+		// Clean up potential "../" leading (which caused the bug)
+		// If relPath starts with "../", it's outside root.
+		if filepath.IsAbs(relPath) || (len(relPath) > 2 && relPath[:3] == "../") {
+             fmt.Printf("Warning: Skipping file outside src root: %s\n", relPath)
+             continue
+        }
+
+		normalizedFiles = append(normalizedFiles, relPath)
+	}
+
+	// Add the entrypoint itself if not present? (Usually NFT includes it, but maybe not?)
+	// Let's assume NFT includes everything needed.
+	// But we definitely need the entrypoint file itself to run bun build on it.
+    // If NFT didn't include it, we might miss it.
+    // Check if entrypoint is in normalizedFiles?
+    // Optimization: Just add it if missing.
+
 	// 2. Isolate
-	if err := o.isolator.Isolate(cfg.SrcDir, cfg.OutputDir, files); err != nil {
+	if err := o.isolator.Isolate(cfg.SrcDir, cfg.OutputDir, normalizedFiles); err != nil {
 		return fmt.Errorf("isolation failed: %w", err)
 	}
 

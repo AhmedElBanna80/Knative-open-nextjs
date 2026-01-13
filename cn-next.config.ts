@@ -15,7 +15,8 @@ const config: OpenNextConfig = {
         },
         database_service: {
             connection_string: process.env.DATABASE_URL || "postgres://user:pass@localhost:5432/db"
-        }
+        },
+        docker_registry: process.env.DOCKER_REGISTRY || "ttl.sh/knative-next"
     },
     build: {
         base_image: "oven/bun:alpine"

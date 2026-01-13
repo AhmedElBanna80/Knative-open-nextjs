@@ -16,6 +16,8 @@ const InfrastructureSchema = z.object({
         use_ssl: z.boolean().default(true)
     }).describe("S3 Compatible Object Storage Config"),
 
+    docker_registry: z.string().default("ttl.sh/knative-next"), // Default to ephemeral registry for dev
+
     // Database Connection
     database_service: z.object({
         connection_string: z.string().describe("PostgreSQL Connection String"),

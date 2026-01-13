@@ -6,7 +6,9 @@ type Config struct {
 }
 
 type Infrastructure struct {
-	S3Service S3Service `json:"s3_service"`
+	S3Service       S3Service       `json:"s3_service"`
+	DatabaseService DatabaseService `json:"database_service"`
+	DockerRegistry  string          `json:"docker_registry"`
 }
 
 type S3Service struct {
