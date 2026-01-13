@@ -9,10 +9,10 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/target: "100"
-        force-update: "1767703440"
+        force-update: "1767750000"
     spec:
       containers:
-        - image: us-central1-docker.pkg.dev/gsw-mcp/knative-next-repo/file-manager:latest
+        - image: us-central1-docker.pkg.dev/gsw-mcp/knative-next-repo/file-manager:alpine
           env:
             - name: NEXT_HANDLER_PATH
               value: "/"

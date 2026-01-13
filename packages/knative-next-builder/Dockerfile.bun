@@ -1,6 +1,9 @@
-# Final Runtime Stage (Distroless)
+# Final Runtime Stage (Alpine)
 # we assume the build context (dist-deploy) contains everything prepared by the builder
-FROM gcr.io/distroless/cc-debian12
+FROM alpine:3.20
+
+# Install dependencies needed for HTTPS (ca-certificates) and potentially others
+RUN apk add --no-cache ca-certificates libstdc++ gcompat
 
 WORKDIR /app
 

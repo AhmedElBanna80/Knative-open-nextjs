@@ -119,6 +119,34 @@ func Run(args []string) error {
 	}
 	fmt.Printf("Detected relative app dir: %s\n", relativeAppDir)
 
+    // Flatten: Move the deep app dir to a clean location (e.g. "app") to hide source paths
+    if strings.Count(relativeAppDir, string(os.PathSeparator)) > 0 {
+        originalRelPath := relativeAppDir
+        srcAppPath := filepath.Join(absOutputDir, relativeAppDir)
+        destAppPath := filepath.Join(absOutputDir, "standalone-app")
+        
+        // Move
+        fmt.Printf("Flattening directory structure: %s -> %s\n", srcAppPath, destAppPath)
+        if err := os.Rename(srcAppPath, destAppPath); err != nil {
+             return fmt.Errorf("failed to move app dir: %w", err)
+        }
+        
+        // Update relativeAppDir to new location
+        relativeAppDir = "standalone-app"
+        
+        // Cleanup old empty parent directories
+        // Get the top-level directory of the original path (e.g. "Users" or "home")
+        parts := strings.Split(originalRelPath, string(os.PathSeparator))
+        if len(parts) > 0 {
+            topLevel := parts[0]
+            if topLevel != "standalone-app" && topLevel != "node_modules" && topLevel != "assets" && topLevel != "package.json" {
+                cleanupPath := filepath.Join(absOutputDir, topLevel)
+                fmt.Printf("Cleaning up extracted source artifacts: %s\n", cleanupPath)
+                os.RemoveAll(cleanupPath)
+            }
+        }
+    }
+
 	runnerPath, err := generator.GenerateRunner(analysis.NextConfig, tempDir, relativeAppDir)
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)

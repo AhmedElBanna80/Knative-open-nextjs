@@ -27,5 +27,8 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "dependencies": {
+    "@next/env": "^16.1.1"
+  }
 }

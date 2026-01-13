@@ -6,21 +6,7 @@ import (
 	"github.com/knative-next/static-offloader/config"
 )
 
-// MockUploader implements the Upload interface for testing
-type MockUploader struct {
-	BaseURL       string
-	UploadedFiles map[string]string // Key: LocalPath, Value: RemoteURL
-}
-
-func (m *MockUploader) Upload(localPath, remoteKey string) (string, error) {
-	if m.UploadedFiles == nil {
-		m.UploadedFiles = make(map[string]string)
-	}
-	// Simulate public URL construction using the configured BaseURL
-	url := m.BaseURL + "/" + remoteKey // Simple concatenation for test
-	m.UploadedFiles[localPath] = url
-	return url, nil
-}
+// MockUploader definition moved to mock.go
 
 // TestStaticAssetOffload verifies that the offloader correctly:
 // 1. Accepts a GKE-production-like configuration
