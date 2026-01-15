@@ -47,7 +47,9 @@ func (o *Orchestrator) Run(cfg Config) error {
 	nftPath := filepath.Join(cfg.SrcDir, cfg.Entrypoint+".nft.json")
 	files, err := o.parser.Parse(nftPath)
 	if err != nil {
-		return fmt.Errorf("NFT parse failed: %w", err)
+		// NFT is optional (e.g. for standalone builds or simple apps)
+		fmt.Printf("⚠️  Warning: NFT parse failed (proceeding without explicit isolation): %v\n", err)
+		files = []string{}
 	}
 
 	// 1a. Normalize Paths

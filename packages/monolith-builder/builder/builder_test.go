@@ -59,7 +59,7 @@ func TestBuildMonolith(t *testing.T) {
 	if len(mockExec.CommandsExecuted) == 0 {
 		t.Error("No commands executed")
 	}
-	expectedCmd := "bun build --compile --minify --sourcemap ./server.js --outfile server"
+	expectedCmd := "bun build --compile --bytecode --minify --sourcemap ./server.js --outfile server"
 	found := false
 	for _, cmd := range mockExec.CommandsExecuted {
 		if cmd == expectedCmd {

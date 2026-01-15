@@ -62,9 +62,9 @@ func main() {
 			BaseURL: infra.S3Service.PublicURL,
 		}
 	} else {
-		assetUploader, err = uploader.NewS3Uploader(context.TODO(), infra)
+		assetUploader, err = uploader.NewMinIOUploader(context.TODO(), infra)
 		if err != nil {
-			log.Fatalf("Failed to initialize S3 Uploader: %v", err)
+			log.Fatalf("Failed to initialize MinIO Uploader: %v", err)
 		}
 	}
 

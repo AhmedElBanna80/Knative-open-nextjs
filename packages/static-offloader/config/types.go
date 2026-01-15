@@ -20,3 +20,7 @@ type S3Service struct {
 	PublicURL string `json:"public_url"`
 	UseSSL    bool   `json:"use_ssl"`
 }
+
+type DatabaseService struct {
+	ConnectionString string `json:"connection_string"`
+}
