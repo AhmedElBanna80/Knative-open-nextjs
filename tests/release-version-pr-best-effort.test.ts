@@ -46,6 +46,7 @@ interface Step {
   id?: string;
   uses?: string;
   run?: string;
+  shell?: string;
   if?: string;
   'continue-on-error'?: unknown;
 }
@@ -132,6 +133,18 @@ describe('release.yml version-pr: the version bump still fails loudly', () => {
       expect(
         (step.run as string).includes('No unreleased changesets found'),
         `the version-bump step must special-case "No unreleased changesets found" so the post-Version-PR ready-to-publish state does not fail the job and block Publish. Without it the lane cannot publish after a Version PR lands.`,
+      ).toBe(true);
+      // The tolerance above is DEFEATED unless the step also drops `-e`. GitHub's
+      // default `shell: bash` runs `bash -e {0}`, and with `-e` the
+      // `out="$(changeset version)"` assignment exits the step the moment the
+      // command fails — BEFORE the exit-code branch runs. So the step MUST set a
+      // custom `shell:` that omits `-e` (we branch on the captured code ourselves).
+      // Measured: with `-e` the run failed at the assignment; without it, it
+      // tolerated the no-changesets case and reached the publish path.
+      const sh = typeof step.shell === 'string' ? step.shell : '';
+      expect(
+        sh.length > 0 && !/(^|\s)-\w*e/.test(sh.replace('pipefail', '')),
+        `the version-bump step relies on a custom \`shell:\` that omits \`-e\` (e.g. \`bash --noprofile --norc -uo pipefail {0}\`). Under the default \`bash -e\`, its "No unreleased changesets found" tolerance never runs — the failing command exits the step first — and Publish stays blocked.`,
       ).toBe(true);
     }
   });
