@@ -397,3 +397,79 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           format: table
+
+  # ── BUILT-IMAGE CVE ENFORCEMENT (#981) ───────────────────────────────────
+  #
+  # The base-image-trivy job above is a REPORT-ONLY signal on the UNPATCHED base
+  # reference (#982). The file-manager image-supply-chain job at the top of this
+  # file enforce-scans its BUILT image — but the two OTHER shipped images had no
+  # enforce-grade BUILT-image gate: apps/docs (oven/bun:*-alpine runtime) and
+  # examples/bun-exec/Dockerfile.node (node:22-alpine). An actionable HIGH that
+  # SURVIVED those Dockerfiles' build-time `apk upgrade --no-cache` failed no
+  # gate.
+  #
+  # This job closes that. It BUILDS each shipped image's runtime OS layer — the
+  # same pinned base digest + the same whole-base `apk upgrade` + the runtime
+  # `apk add`, reproduced by the `*.trivyscan` fixtures (kept in lockstep with the
+  # real Dockerfiles by tests/built-image-trivy.test.ts) — into a local OCI layout
+  # and Trivy-scans THAT BUILT layout. So the gate runs against the PATCHED
+  # artifact users run: an actionable HIGH surviving the upgrade fails on main; a
+  # base-ref-only CVE the upgrade clears does not (the very self-contradiction
+  # that red-lined main when #971 enforced on the base-ref).
+  #
+  # Coverage is deliberately the OS-package layer only. The app JS closures are
+  # scanned by ci.yml (docs-closure + vinext-precompile-closure); native sharp is
+  # the acknowledged native-provenance gap. That is why the fixtures reproduce the
+  # runtime OS layer rather than rebuilding the whole app — identical Trivy
+  # OS-package result, a fraction of the cost.
+  #
+  # Phased EXACTLY like the file-manager gate: report-on-PR, ENFORCE-on-main via
+  # `continue-on-error: ${{ github.ref != 'refs/heads/main' }}`. This job holds no
+  # write credential (contents: read only) and pushes/signs nothing, so running it
+  # report-only on the merge queue's gh-readonly-queue ref is safe. It is
+  # deliberately NOT added to the required-checks set here — that is founder-owned
+  # branch protection — so it cannot hang the queue even though it runs there.
+  # Guarded by tests/built-image-trivy.test.ts.
+  built-image-trivy:
+    name: Trivy — shipped images (BUILT, enforce on main)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # apps/docs runtime OS layer.
+          - name: apps/docs runtime
+            file: apps/docs/Dockerfile.trivyscan
+          # examples/bun-exec/Dockerfile.node OS layer.
+          - name: examples/bun-exec Dockerfile.node
+            file: examples/bun-exec/Dockerfile.node.trivyscan
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Build into a LOCAL OCI-layout directory (never pushed — this job holds no
+      # packages:write). Trivy scans this exact built layout below. tar=false
+      # because Trivy's --input accepts an OCI layout directory, not a tarball.
+      - name: Build the shipped runtime OS layer (local OCI layout)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          outputs: type=oci,dest=image-oci,tar=false
+
+      - name: Trivy scan BUILT image — FAIL on HIGH/CRITICAL
+        # Report (don't block) on PRs and on the merge-queue ref; ENFORCE (fail)
+        # on main. Same phased rollout as the file-manager built-image gate.
+        continue-on-error: ${{ github.ref != 'refs/heads/main' }}
+        # SHA-pinned to match the gates above.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          input: image-oci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          format: table

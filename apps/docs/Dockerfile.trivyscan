@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+#
+# BUILT-image Trivy scan fixture for apps/docs (#981) — NOT a shipped image.
+#
+# #971's base-image-trivy job scans the pinned alpine BASE reference; #982 made
+# that report-only because the shipped image is patched at build time by the
+# Dockerfile's whole-base `apk upgrade --no-cache`, so enforcing on the raw base
+# would block main on CVEs the artifact users run has already cleared. This
+# fixture reproduces the RUNTIME OS LAYER of apps/docs/Dockerfile — the same
+# pinned base digest, the same whole-base `apk upgrade`, the same runtime link
+# libs — so the base-image Trivy job (supply-chain.yml `built-image-trivy`) can
+# ENFORCE on the PATCHED artifact on main: an actionable HIGH surviving the
+# upgrade fails; a base-ref-only CVE the upgrade clears does not.
+#
+# It deliberately reproduces only the OS-package layer. The docs app's JS closure
+# is scanned by ci.yml's docs-closure gate; native sharp is the acknowledged
+# native-provenance gap. The FROM digest and the apk lines are kept in lockstep
+# with apps/docs/Dockerfile's runtime stage by tests/built-image-trivy.test.ts
+# (drift guard) and tests/base-image-cve-hygiene.test.ts (whole-base upgrade).
+FROM oven/bun:1.4.0-alpine@sha256:07235578f79ef8c6f97d94aee7938e76f5cdba5f21ae5dbfdd3d3d38058437eb
+
+RUN apk upgrade --no-cache && apk add --no-cache libstdc++ libgcc
