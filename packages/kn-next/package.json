@@ -171,7 +171,7 @@
     "next": "16.2.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "vinext": "1.0.0-beta.8",
+    "vinext": "1.0.0-beta.9",
     "vitest": "^4.0.18"
   },
   "dependencies": {
