@@ -187,12 +187,27 @@ jobs:
       - name: Verify the version bump succeeds (fail-closed)
         id: bump
         run: |
-          set -euo pipefail
-          bun run changeset:version
+          set -uo pipefail
+          # Run the exact bump the action runs. TWO valid outcomes:
+          #   exit 0  -> changesets existed and versioned cleanly (Version-PR path)
+          #   exit 1 + "No unreleased changesets found" -> nothing to version, which
+          #     is the NORMAL post-version-PR state and means we are READY TO PUBLISH.
+          # Only a DIFFERENT non-zero (a malformed changeset, a throwing changelog
+          # hook, a broken bump) is a real defect that must stay fail-closed.
+          # Without this, a clean "nothing to release" run failed this job, left
+          # has_changesets unset, and skipped the publish path entirely (#987 landed
+          # 0.4.0 in-tree but the publish never reached its gate).
+          out="$(bun run changeset:version 2>&1)"; rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | grep -q "No unreleased changesets found"; then
+            echo "::error::changeset version failed for a reason other than 'no changesets' (exit $rc)" >&2
+            exit 1
+          fi
           # Undo it: the action below re-runs the same bump and opens the PR.
           # Restore tracked edits/deletions (package.json versions, CHANGELOGs,
           # the deleted .changeset/*.md) and drop the newly generated untracked
           # CHANGELOG files, so the action starts from the tree this step did.
+          # No-op when there were no changesets.
           git checkout -- .
           git clean -fd
 
