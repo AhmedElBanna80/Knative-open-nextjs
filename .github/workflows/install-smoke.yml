@@ -16,6 +16,12 @@ on:
   push:
     branches: ['**']
   workflow_dispatch:
+  # This job posts the REQUIRED "Pack + clean-install + CLI + app-import" context.
+  # The merge queue runs required checks on a `refs/heads/gh-readonly-queue/main/...`
+  # ref via `merge_group`; without this trigger the context never reports there and
+  # the queue hangs. No `paths:`/`if:` guards gate this job, so it executes on
+  # merge_group. Guarded by tests/merge-queue-triggers.test.ts.
+  merge_group:
 
 jobs:
   install-smoke:

@@ -33,6 +33,14 @@ on:
   pull_request:
     branches: ['**']
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  # This job posts the REQUIRED "Escalation triggers acknowledged" context, so it
+  # must report on the merge queue's `refs/heads/gh-readonly-queue/main/...` ref via
+  # `merge_group` or the queue hangs. The trigger check itself CANNOT run there —
+  # there is no `pull_request` payload (base/head SHA, labels) to diff against, and
+  # the acknowledgement was already decided at PR time — so on merge_group the job
+  # runs a single no-op step and reports success (see the step guards below).
+  # Guarded by tests/merge-queue-triggers.test.ts.
+  merge_group:
 
 permissions:
   contents: read
@@ -44,12 +52,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # On merge_group there is no pull_request payload to diff and the check was
+      # already satisfied at PR time; this no-op posts the required context green so
+      # the queue is not hung by a check that cannot meaningfully re-run here.
+      - name: Acknowledge on merge_group (no-op — checked at PR time)
+        if: github.event_name == 'merge_group'
+        run: echo "merge_group event - escalation triggers were checked at PR time; nothing to re-check on the merged ref."
+
       - name: Checkout (full history — the check diffs against the merge base)
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
+        if: github.event_name == 'pull_request'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
@@ -58,6 +75,7 @@ jobs:
       # text (anyone who can label can set them), so they arrive via env and are read
       # as data. Interpolating them into the shell would be an injection.
       - name: Check for unacknowledged escalation triggers
+        if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

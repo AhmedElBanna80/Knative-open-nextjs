@@ -25,6 +25,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # This job posts the REQUIRED "SBOM + Trivy (+ cosign sign on main)" context, so
+  # it must report on the merge queue's `refs/heads/gh-readonly-queue/main/...` ref
+  # via `merge_group` or the queue hangs. SAFE on the queue ref: every push/sign
+  # side effect below is gated `if: github.ref == 'refs/heads/main'`, and the
+  # gh-readonly-queue ref is NOT `refs/heads/main`, so nothing is pushed or signed
+  # here — the build + Trivy scan run (report-only, exactly as on a PR) and post
+  # the context. Guarded by tests/merge-queue-triggers.test.ts.
+  merge_group:
 
 permissions:
   contents: read

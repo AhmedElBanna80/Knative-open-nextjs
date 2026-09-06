@@ -5,6 +5,13 @@ on:
     branches: ['**']
   push:
     branches: [main]
+  # The GitHub merge queue runs this repo's REQUIRED status checks on a temporary
+  # `refs/heads/gh-readonly-queue/main/...` ref via the `merge_group` event. Six
+  # of ci.yml's jobs post required contexts, so without this trigger those checks
+  # never report on the queue ref and every PR hangs in AWAITING_CHECKS. A bare
+  # `merge_group:` runs on the default type (`checks_requested`). Guarded by
+  # tests/merge-queue-triggers.test.ts.
+  merge_group:
 
 # Supersede this workflow's own in-flight runs (#674). #673 fixed the
 # `pull_request` filter from `['*']` to `['**']`, which took stacked PRs — this
@@ -886,8 +893,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # On `merge_group` there is no PR/push diff base for dorny/paths-filter to
+      # resolve, and the queue REQUIRES the "Docs site build" context to report on
+      # the merged ref regardless. So skip the filter on merge_group and force the
+      # build steps to run (see the `|| github.event_name == 'merge_group'` on each
+      # docs step below) — the merge queue then validates the docs build against
+      # the exact merged combination it is about to land.
       - name: Detect relevant changes
         id: filter
+        if: github.event_name != 'merge_group'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           # For push (main) the base is the previous commit; on PRs the action
@@ -900,19 +914,19 @@ jobs:
               - '.github/workflows/ci.yml'
 
       - name: Setup Node.js
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
       - name: Setup bun
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
 
       - name: Install dependencies
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         run: bun install --frozen-lockfile
 
       # lib→db→core, same ordering rationale as compat-smoke: core's dts build
@@ -920,22 +934,22 @@ jobs:
       # dist first or core's build hard-fails (TS2307). knext-docs then resolves
       # @getknext/core (and its ./adapter + ./validate subpaths) against that dist.
       - name: Build @getknext/lib
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         run: bun run --filter @getknext/lib build
 
       - name: Build @getknext/db
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         run: bun run --filter @getknext/db build
 
       - name: Build @getknext/core
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         run: bun run --filter @getknext/core build
 
       # Config-validate gate: run the docs dogfood kn-next.config.ts through the
       # REAL @getknext/core/validate (the public surface), same code path
       # `kn-next deploy` uses. Proves the workspace `./validate` export resolves.
       - name: Validate the docs kn-next.config.ts (real validateConfig)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         working-directory: apps/docs
         run: bun run config:validate
 
@@ -959,13 +973,13 @@ jobs:
       # Each is a different nitro preset, and two of them cannot run the default
       # one's output.
       - name: Build knext-docs (default = bun target, the knext dogfood image)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         run: |
           rm -r apps/docs/.output apps/docs/.vercel 2>/dev/null || true
           bun run --filter knext-docs build
 
       - name: Assert the bun target emits its bespoke entry
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         # Both halves. The path alone passes for a build that silently fell back
         # to nitro's default entry, which is exactly what a mis-set preset makes.
         run: |
@@ -973,7 +987,7 @@ jobs:
           grep -q 'metricsServer' apps/docs/.output/server/index.mjs
 
       - name: Build knext-docs for Node (NITRO_PRESET=node — the OKE image)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         env:
           NITRO_PRESET: node
         run: |
@@ -981,7 +995,7 @@ jobs:
           bun run --filter knext-docs build
 
       - name: Assert the Node target does NOT carry the bun entry
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         # knext-bun-entry.mjs serves through Bun.serve; carried into a node:22
         # image it builds cleanly and dies at runtime. This is the assertion that
         # would have caught Dockerfile.oke shipping a bun build.
@@ -990,7 +1004,7 @@ jobs:
           ! grep -q 'metricsServer' apps/docs/.output/server/index.mjs
 
       - name: Build knext-docs for Vercel (NITRO_PRESET=vercel — knext.dev)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         env:
           NITRO_PRESET: vercel
         run: |
@@ -998,7 +1012,7 @@ jobs:
           bun run --filter knext-docs build
 
       - name: Assert the Vercel target emits Build Output API v3
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         # Vercel consumes .vercel/output only when the build produces it. A build
         # that quietly emitted .output instead reported "4 successful" and then
         # failed the deploy — that is the failure this gates.
@@ -1015,7 +1029,7 @@ jobs:
       # so the npm→pnpm transitive shifts (and the root pnpm.overrides Trivy
       # remediations) are checked against the docs-only tree, not the whole repo.
       - name: Prune docs dependency closure (turbo prune → scoped lockfile)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         run: bun x turbo prune knext-docs --out-dir ./.docs-closure
 
       # Trivy fs scan of the docs closure lockfile. Report (don't block) on PRs;
@@ -1025,12 +1039,12 @@ jobs:
       # the file under a nested key its parser does not descend into.
       # `scripts/sbom-docs-closure.mjs` carries the full measurement.
       - name: Install the docs closure (the SBOM is read from the installed tree)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         working-directory: ./.docs-closure
         run: bun install
 
       - name: Build the docs closure SBOM (production dependencies)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         run: node scripts/sbom-docs-closure.mjs ./.docs-closure ./.docs-closure/closure.cdx.json
 
       # ENFORCE (fail) on main — the same phased gate the image supply-chain job
@@ -1043,7 +1057,7 @@ jobs:
       # removes the toolchain noise that made the excuse necessary, so a finding
       # here is now a finding about what ships.
       - name: Trivy scan — docs dependency closure (FAIL on HIGH/CRITICAL)
-        if: steps.filter.outputs.docs == 'true'
+        if: steps.filter.outputs.docs == 'true' || github.event_name == 'merge_group'
         continue-on-error: ${{ github.ref != 'refs/heads/main' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
