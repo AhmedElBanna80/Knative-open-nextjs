@@ -186,8 +186,13 @@ jobs:
       # defect, which is exactly what this must not do.
       - name: Verify the version bump succeeds (fail-closed)
         id: bump
+        # Override the default `bash -e {0}`: with `-e`, `out="$(changeset version)"`
+        # exits the step the instant the command fails — BEFORE our `rc=$?` branch
+        # runs — so the "No unreleased changesets found" (exit 1) tolerance never
+        # took effect and the publish stayed blocked. Drop `-e`; keep `-u`+pipefail;
+        # WE decide fail-vs-tolerate from the captured exit code below.
+        shell: bash --noprofile --norc -uo pipefail {0}
         run: |
-          set -uo pipefail
           # Run the exact bump the action runs. TWO valid outcomes:
           #   exit 0  -> changesets existed and versioned cleanly (Version-PR path)
           #   exit 1 + "No unreleased changesets found" -> nothing to version, which
