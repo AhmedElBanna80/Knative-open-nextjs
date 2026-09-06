@@ -116,6 +116,25 @@ describe('release.yml version-pr: the version bump still fails loudly', () => {
       ).toBe(false);
     }
   });
+
+  it('tolerates the "no changesets" ready-to-publish state (does not block the publish)', () => {
+    // The publish path only runs when has_changesets == 'false' — i.e. AFTER a
+    // Version PR consumed all changesets. In that state `changeset version` exits
+    // 1 with "No unreleased changesets found". If the fail-closed bump step treats
+    // that as a defect, the whole version-pr job fails, has_changesets never gets
+    // set, and Publish skips — which is exactly what left 0.4.0 in-tree but never
+    // published. So the step MUST special-case that message as success while still
+    // failing on any OTHER non-zero (a real broken bump).
+    const bumpSteps = stepsOf(VERSION_JOB).filter(
+      (s) => typeof s.run === 'string' && s.run.includes('changeset:version'),
+    );
+    for (const step of bumpSteps) {
+      expect(
+        (step.run as string).includes('No unreleased changesets found'),
+        `the version-bump step must special-case "No unreleased changesets found" so the post-Version-PR ready-to-publish state does not fail the job and block Publish. Without it the lane cannot publish after a Version PR lands.`,
+      ).toBe(true);
+    }
+  });
 });
 
 describe('release.yml version-pr: the fail-closed bump runs BEFORE the PR-open (F2)', () => {
