@@ -31,6 +31,7 @@ knext ships three things that version on **separate** lines. Nothing forces them
 
 | Package set | CRD `apiVersion` | Operator bundle | Notes |
 | --- | --- | --- | --- |
+| `0.4.0` (in tree) | `apps.kn-next.dev/v1alpha1` | `operator-latest` | first npm release with all four version-locked together. **Breaking:** the app metrics-port default moves `9091` → `9464` — on a stock Knative install the queue-proxy binds `9091`, so an app defaulting there crash-looped with `EADDRINUSE`. knext’s own annotation, NetworkPolicy, PodMonitor and dashboards repoint automatically; any external scrape config, self-written ServiceMonitor/PodMonitor, Grafana query or NetworkPolicy pinned to `:9091` must move to `:9464`. Upgrade operator/CRD first, then CLI. |
 | `0.3.1` (in tree) | `apps.kn-next.dev/v1alpha1` | `operator-latest` | current `main`; the first set where all **four** move together — `kn-next`, the `npx` alias, joins the version-locked group |
 | `0.3.0` (in tree) | `apps.kn-next.dev/v1alpha1` | `operator-latest` | the three are version-locked from this release on |
 | `@getknext/core@0.3.0`, `@getknext/lib@0.2.0`, `@getknext/db@0.2.1` (published 2026-07-26) | `apps.kn-next.dev/v1alpha1` | `operator-latest` | the first npm release; the three published at **different** numbers — see "the drift" below |
