@@ -100,6 +100,46 @@ describe('bun.lock integrity (#879)', () => {
     ).toBeGreaterThan(800);
   });
 
+  it('resolves no browserslist below the CVE-2026-73088/73089 fix line (#888)', () => {
+    // The docs-closure nightly went green only because its scan was re-scoped to
+    // a prod-only SBOM (73e265aa), which excludes the dev/build toolchain that
+    // pulls the vulnerable line. The lockfile itself still resolved
+    // browserslist@4.28.1 (via @babel/helper-compilation-targets), which carries
+    // the two HIGH CVEs. Per the bump-don't-suppress discipline, the floor is
+    // enforced by a top-level override and proved here against the lockfile.
+    const versions = [...lockText().matchAll(/browserslist@(\d+)\.(\d+)\.(\d+)/g)];
+    expect(
+      versions.length,
+      'no browserslist resolution found in bun.lock — the guard has no subject',
+    ).toBeGreaterThan(0);
+    const below = versions
+      .map((m) => ({ raw: m[0], t: [Number(m[1]), Number(m[2]), Number(m[3])] as const }))
+      .filter(({ t }) => t[0] < 4 || (t[0] === 4 && (t[1] < 28 || (t[1] === 28 && t[2] < 7))));
+    expect(
+      below.map((b) => b.raw),
+      'bun.lock still resolves a browserslist below 4.28.7, which carries ' +
+        'CVE-2026-73088/73089 (HIGH). Raise the top-level `browserslist` override ' +
+        'floor and relock; do not suppress the finding.',
+    ).toEqual([]);
+  });
+
+  it('declares the browserslist override floor at or above the fix line (#888)', () => {
+    const floor = manifest().overrides?.browserslist;
+    expect(
+      floor,
+      'package.json declares no `browserslist` override — the CVE-2026-73088/73089 ' +
+        'floor is what keeps the babel-pulled 4.28.1 from resolving',
+    ).toBeDefined();
+    // Must pin a floor of at least 4.28.7 (the fixed line).
+    const min = String(floor).match(/>=\s*(\d+)\.(\d+)\.(\d+)/);
+    expect(min, 'the browserslist override does not express a `>=x.y.z` floor').not.toBeNull();
+    const [maj, minr, pat] = [Number(min?.[1]), Number(min?.[2]), Number(min?.[3])];
+    expect(
+      maj > 4 || (maj === 4 && (minr > 28 || (minr === 28 && pat >= 7))),
+      'the browserslist override floor is below 4.28.7, the CVE fix line',
+    ).toBe(true);
+  });
+
   it('packageManager names the bun the lockfile was written by', () => {
     // Not enforcement — measured: bun ignores this field. It is the only place
     // recording WHICH version to install with, so the error messages above can
