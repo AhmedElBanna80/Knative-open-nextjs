@@ -24,7 +24,7 @@ two tools below.
 ## 1. The residue scan (the gate)
 
 ```bash
-pnpm run lint:mutation-residue        # node scripts/scan-mutation-residue.mjs
+bun run lint:mutation-residue        # node scripts/scan-mutation-residue.mjs
 ```
 
 Exit 1 if **any tracked file** contains the standard mutation marker. It never consults git's
@@ -125,4 +125,4 @@ shape most likely to be decoration, because nothing on the happy path ever exerc
 - Snapshot bytes before the first mutation.
 - Never replay inverse edits.
 - Assert each anchor occurs exactly once — before mutating and after restoring.
-- Run `pnpm run lint:mutation-residue` before you commit. Do not substitute `git status`.
+- Run `bun run lint:mutation-residue` before you commit. Do not substitute `git status`.
