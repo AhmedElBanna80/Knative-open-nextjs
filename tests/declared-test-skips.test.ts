@@ -54,15 +54,6 @@ const REPO_ROOT = resolve(import.meta.dirname, '..');
  * grew to eleven files unobserved in the first place.
  */
 const DECLARED: Record<string, { skips: Record<string, number>; reason: string }> = {
-  'apps/file-manager/bun-portability.test.ts': {
-    skips: { 'it.skipIf': 2 },
-    reason:
-      'Boots a bun binary against apps/file-manager/.next/standalone/…/server.js. ARTIFACT-GATED ' +
-      'and WEAK: file-manager builds vinext → .output since ADR-0048 and no longer emits that ' +
-      'standalone tree, so in CI the skip is always taken and asserts nothing. Surfaced by the ' +
-      '#932 artifact-gated guard and grandfathered there (GRANDFATHERED_WEAK) rather than hidden; ' +
-      'repointing or retiring it is out of #932 scope. Tracked by #932.',
-  },
   'apps/file-manager/sigterm-drain-e2e.test.ts': {
     skips: { 'it.skipIf': 4 },
     reason:
@@ -166,13 +157,7 @@ const LANE_BACKED: Record<string, { flag: string }> = {
  * the whole point. Everything here is a genuinely weak skip (green-by-skip in CI)
  * that this change surfaced but is out of scope to fix.
  */
-const GRANDFATHERED_WEAK: Record<string, string> = Object.freeze({
-  'apps/file-manager/bun-portability.test.ts':
-    'Gates on existsSync of apps/file-manager/.next/standalone/…/server.js, which file-manager no ' +
-    'longer emits — it builds vinext → .output since ADR-0048 — so this skip is always taken in ' +
-    'CI and asserts nothing there. Same weak class as the three #932 fixed; surfaced by the ' +
-    'artifact-gated guard, out of that issue’s scope to repoint or retire. Tracked by #932.',
-});
+const GRANDFATHERED_WEAK: Record<string, string> = Object.freeze({});
 
 /**
  * The block of `ci.yml` belonging to the job that runs `testPath`, bounded by the

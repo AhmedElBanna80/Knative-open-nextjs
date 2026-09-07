@@ -75,7 +75,7 @@ const COVERED_TIERS: Array<{ label: string; files: () => string[] }> = [
     // from TYPECHECK SCOPE, not because it is dead — the older note here claimed
     // it was dead code and safe to delete, which was measured and is false. On
     // vitest 4.0.18 it is still loaded and is what puts `apps/**` under happy-dom;
-    // deleting it turns apps/file-manager/bun-portability.test.ts red. See the
+    // deleting it turns apps/file-manager/child-ports.test.ts red. See the
     // corrected explanation in tsconfig.typecheck.json.
     label: 'root vitest.*.ts',
     files: () =>
