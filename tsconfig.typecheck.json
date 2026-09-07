@@ -48,7 +48,7 @@
   // vitest 4 ... and nothing references the file", and invited deleting it as "a
   // separate change". That was measured and is false: on vitest 4.0.18 the file is
   // still loaded, and it is what puts `apps/**` tests under happy-dom. Deleting it
-  // (with nothing else changed) turns apps/file-manager/bun-portability.test.ts RED
+  // (with nothing else changed) turns apps/file-manager/child-ports.test.ts RED
   // — restoring only that file turns it green again. So the exclusion here is a
   // typecheck-scope decision about a LIVE file, not a headstone for a dead one.
   // Do not delete vitest.workspace.ts on the strength of the old note.
