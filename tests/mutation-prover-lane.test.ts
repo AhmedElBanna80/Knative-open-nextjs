@@ -1114,17 +1114,22 @@ describe('#927 SE-3 — every sprint-1 guard has a prover OR a dated exemption',
     ).toEqual([]);
   });
 
-  it('the split is 6 proven / 3 excused — and both halves are asserted', () => {
+  it('the split is 8 proven / 1 excused — and both halves are asserted', () => {
     // Stated as numbers so a silent migration between the two columns — an
     // exemption quietly replacing a prover — is visible rather than absorbed by
     // the subtraction above, which is satisfied either way.
     // 5/4 → 6/3 (sprint-3 A5): #906's guard moved from the excused column to
     // the proven one — `mutation-prove-isr-staleness.mjs` landed and the #928
     // exemption entry was removed in the same commit.
+    // 6/3 → 8/1 (#928 close-out): #896 and #899 moved to the proven column —
+    // `mutation-prove-scaffold-cache-handler.mjs` and
+    // `mutation-prove-cli-node-runtime.mjs` landed and both exemption entries
+    // were removed in the same change. Only #897 (docker-e2e) stays excused,
+    // renewed because it cannot be proven at PR time.
     const proven = provenSpecs();
     const excused = activeGuardProverExemptions();
-    expect(SPRINT1_GUARDS.filter(({ guard }) => proven.has(guard))).toHaveLength(6);
-    expect(SPRINT1_GUARDS.filter(({ guard }) => excused.has(guard))).toHaveLength(3);
+    expect(SPRINT1_GUARDS.filter(({ guard }) => proven.has(guard))).toHaveLength(8);
+    expect(SPRINT1_GUARDS.filter(({ guard }) => excused.has(guard))).toHaveLength(1);
   });
 
   it('no guard is BOTH proven and excused (a stale exemption)', () => {
@@ -1148,7 +1153,9 @@ describe('#927 SE-3 — every sprint-1 guard has a prover OR a dated exemption',
   it('each exempted guard is a real spec file', () => {
     // 4 → 3 (sprint-3 A5): #906's entry left the list when its prover landed
     // (`mutation-prove-isr-staleness.mjs`), the shrinkage #928 exists to track.
-    expect(GUARD_PROVER_EXEMPTIONS.length).toBe(3);
+    // 3 → 1 (#928 close-out): #896 and #899 left when their provers landed;
+    // only #897 (docker-e2e, not PR-time provable) remains.
+    expect(GUARD_PROVER_EXEMPTIONS.length).toBe(1);
     for (const e of GUARD_PROVER_EXEMPTIONS) {
       expect(existsSync(resolve(REPO_ROOT, e.guard)), `${e.guard} does not exist`).toBe(true);
     }
@@ -1160,16 +1167,18 @@ describe('#927 SE-3 — every sprint-1 guard has a prover OR a dated exemption',
     expect(activeGuardProverExemptions().size).toBe(GUARD_PROVER_EXEMPTIONS.length);
   });
 
-  it('EXPIRY FAILS CLOSED — past the dates, the three become uncovered', () => {
+  it('EXPIRY FAILS CLOSED — past the dates, the one becomes uncovered', () => {
     // Not just "nothing is excused": the consequence is that the subtraction
     // above stops being empty, which is the behaviour that makes the date mean
     // something. 4 → 3 (sprint-3 A5): #906 is now proven, so its lapse-day
     // exposure moved from this list to the proven column for good.
+    // 3 → 1 (#928 close-out): #896 and #899 are now proven too; only #897's
+    // docker-e2e guard is still exposed if its renewed exemption lapses.
     const future = new Date('2099-01-01T00:00:00Z');
     expect(activeGuardProverExemptions(future).size).toBe(0);
     const proven = provenSpecs();
     const stillUncovered = SPRINT1_GUARDS.filter(({ guard }) => !proven.has(guard));
-    expect(stillUncovered).toHaveLength(3);
+    expect(stillUncovered).toHaveLength(1);
   });
 
   it('every exemption points at the tracking issue', () => {

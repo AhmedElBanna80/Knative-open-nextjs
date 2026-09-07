@@ -1131,40 +1131,32 @@ export const PROVER_AUDIT_EXEMPTIONS = Object.freeze([
  */
 export const GUARD_PROVER_EXEMPTIONS = Object.freeze([
   Object.freeze({
-    guard: 'packages/kn-next/src/__tests__/create-scaffold.test.ts',
-    justification:
-      '#896 scaffold cache-handler wiring. Its subject is templates/app/*.hbs, which concurrent ' +
-      "sprint-2 work owns; a prover anchored in another team's live diff is inert on arrival, " +
-      "which is #912's exact failure. Write it once the template work has landed.",
-    added: '2026-09-04',
-    expires: '2026-11-01',
-    note: 'Tracked by #928.',
-  }),
-  Object.freeze({
     guard: 'examples/bun-exec/test/alpine-image.docker-e2e.test.ts',
     justification:
-      '#897 SIGTERM drain on the shipped binary. Each mutation needs a docker build plus a ' +
-      'container boot, so the prover is only runnable where the alpine e2e already runs; ' +
-      'proving it on a host without docker would mean asserting on a skipped run.',
-    added: '2026-09-04',
-    expires: '2026-11-01',
+      "#897 SIGTERM drain on the shipped binary. It CANNOT be proven at PR time: the spec's " +
+      'beforeAll does a full `docker build` and boots the alpine container, and every mutation ' +
+      'would repeat that — so the prover is only runnable in the alpine e2e lane, where docker ' +
+      'is present. Adding it to the PR-time run-mutation-provers.mjs fleet (which globs ' +
+      'scripts/mutation-prove-*.mjs and runs every match on every PR) would either ENOENT on a ' +
+      'host without docker or add minutes of image builds to every PR, and asserting on a run ' +
+      'that skipped for lack of docker is exactly the "green because it never ran" shape this ' +
+      'whole lane exists to stop. Renewed rather than converted: the two guards that COULD be ' +
+      'PR-time proven (#896, #899) got provers in this same change; this one stays excused until ' +
+      'the alpine e2e lane grows a docker-gated prover step of its own.',
+    added: '2026-09-07',
+    expires: '2026-12-15',
     note: 'Tracked by #928. Belongs in the alpine e2e lane, not the PR-time fleet.',
   }),
-  Object.freeze({
-    guard: 'packages/kn-next/src/__tests__/cli-node-runtime.test.ts',
-    justification:
-      '#899 seam-guard retirement. The surviving assertions are NEGATIVE (the deleted files must ' +
-      'stay deleted); mutating a file back into existence proves the scan sees it, which ' +
-      'install-smoke.mjs already asserts on the packed artifact. Lowest marginal value of the nine.',
-    added: '2026-09-04',
-    expires: '2026-11-01',
-    note: 'Tracked by #928.',
-  }),
-  // #906 (`cache-handler-isr-staleness.test.ts`) was the fourth entry — the
-  // highest-priority of the four. Removed 2026-09-05 in the same commit that
-  // committed its prover (`scripts/mutation-prove-isr-staleness.mjs`, sprint-3
-  // A5): a guard that is proven must not also be excused, and the SE-3 check
-  // asserts exactly that.
+  // #906 (`cache-handler-isr-staleness.test.ts`) was excused, then proven —
+  // removed 2026-09-05 in the same commit that committed
+  // `scripts/mutation-prove-isr-staleness.mjs` (sprint-3 A5).
+  //
+  // #896 (`create-scaffold.test.ts`) and #899 (`cli-node-runtime.test.ts`) were
+  // the two remaining PR-time-provable entries — removed 2026-09-07 in the same
+  // change that committed their provers
+  // (`scripts/mutation-prove-scaffold-cache-handler.mjs`,
+  // `scripts/mutation-prove-cli-node-runtime.mjs`). A guard that is proven must
+  // not also be excused, and the SE-3 check asserts exactly that.
 ]);
 
 /** Provers currently excused from the liveness audit. Throws on a malformed entry. */
