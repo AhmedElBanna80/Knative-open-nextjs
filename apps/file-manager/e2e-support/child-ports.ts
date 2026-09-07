@@ -74,9 +74,18 @@ export function waitForListeningPort(
         settle(() => resolvePromise(Number(m[1])));
       }
     });
-    proc.once('exit', (code, signal) => {
+    proc.once('close', (code, signal) => {
       // A real startup failure (MODULE_NOT_FOUND, EADDRINUSE, a crash) MUST fail
       // the spec here and now — not time out, and certainly not skip.
+      //
+      // Anchored on `close`, NOT `exit`: Node emits `exit` the instant the child
+      // terminates, but its stderr pipe is not guaranteed drained at that point —
+      // the final `stderr 'data'` chunk carrying the crash reason can still be in
+      // flight, so a rejection built on `exit` intermittently omits the stderr and
+      // the message loses BOOT-FAILED-ON-PURPOSE (the #968-class flake). `close`
+      // is emitted only after ALL stdio streams have flushed and closed, and Node
+      // guarantees it fires after `exit`, so `stderr` here is complete. It is still
+      // prompt — `close` follows `exit` by the drain, not by the timeout budget.
       settle(() =>
         reject(
           new Error(
