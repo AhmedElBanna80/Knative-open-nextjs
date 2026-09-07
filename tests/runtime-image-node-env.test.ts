@@ -40,6 +40,17 @@ const REPO_ROOT = resolve(import.meta.dirname, '..');
  */
 const NOT_APP_RUNTIMES = ['packages/kn-next-operator/', 'packages/scale-zero-pg/'];
 
+/**
+ * `*.trivyscan` files are NOT shipped runtime images — they are minimal
+ * OS-layer scan fixtures for the built-image Trivy gate (supply-chain.yml's
+ * `built-image-trivy`, #981): a pinned base `FROM` + the whole-base `apk
+ * upgrade`, nothing an app process runs in. They carry no `NODE_ENV` because
+ * nothing keys on it in a container that never runs the app. Excluded by
+ * basename suffix so a new one is excluded by default. Their fidelity to the
+ * shipped Dockerfiles is guarded separately (tests/built-image-trivy.test.ts).
+ */
+const isTrivyScanFixture = (f: string): boolean => f.endsWith('.trivyscan');
+
 function discoverAppDockerfiles(): string[] {
   return execFileSync('git', ['ls-files'], {
     cwd: REPO_ROOT,
@@ -49,6 +60,7 @@ function discoverAppDockerfiles(): string[] {
     .split('\n')
     .filter((f) => /(^|\/)Dockerfile(\.[A-Za-z0-9]+)?$/.test(f) || f.endsWith('Dockerfile.hbs'))
     .filter((f) => !NOT_APP_RUNTIMES.some((prefix) => f.startsWith(prefix)))
+    .filter((f) => !isTrivyScanFixture(f))
     .sort();
 }
 

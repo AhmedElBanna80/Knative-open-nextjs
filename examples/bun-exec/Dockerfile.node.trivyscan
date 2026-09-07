@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+#
+# BUILT-image Trivy scan fixture for examples/bun-exec/Dockerfile.node (#981) —
+# NOT a shipped image.
+#
+# #971's base-image-trivy job scans the pinned node:22-alpine BASE reference;
+# #982 made that report-only because the shipped image is patched at build time
+# by the Dockerfile's whole-base `apk upgrade --no-cache`, so enforcing on the
+# raw base would block main on CVEs the artifact users run has already cleared.
+# This fixture reproduces the RUNTIME OS LAYER of Dockerfile.node — the same
+# pinned base digest and the same whole-base `apk upgrade` — so the
+# supply-chain.yml `built-image-trivy` job can ENFORCE on the PATCHED artifact on
+# main: an actionable HIGH surviving the upgrade fails; a base-ref-only CVE the
+# upgrade clears does not.
+#
+# It reproduces only the OS-package layer. The app's pre-compile JS closure is
+# scanned by ci.yml's vinext-precompile-closure gate. The FROM digest and the
+# apk line are kept in lockstep with Dockerfile.node by
+# tests/built-image-trivy.test.ts (drift guard) and
+# tests/base-image-cve-hygiene.test.ts (whole-base upgrade).
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
+
+RUN apk upgrade --no-cache
