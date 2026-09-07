@@ -92,13 +92,20 @@ const SCRIPT_PATHSPECS = [
   'scripts/lib/*.mjs',
   'apps/*/scripts/*.mjs',
   // `:(glob)` magic so `*` does NOT cross a slash: without it git matches
-  // every .md at any depth, which pulls in maintainer-owned `.claude/` and the
-  // whole of `docs/`. Those carry live pnpm instructions too — filed as #933
-  // rather than swept in here, because widening a scan and fixing what it finds
-  // are two changes and this round is scoped to one.
+  // every .md at any depth, which pulls in maintainer-owned `.claude/`.
   ':(glob)*.md',
   ':(glob)apps/*/README.md',
   ':(glob)packages/*/README.md',
+  // #933 widened the scan into docs/ and per-app docs/ after fixing what it
+  // finds there (mutation-testing guide, tracing runbook, loadtest runbook).
+  // docs/wayfinder/ is carved out deliberately: those are dated measurement
+  // records of commands run at a pinned pnpm toolchain — history, not
+  // instructions — and rewriting a record falsifies it. Maintainer-owned
+  // `.claude/` stays out; its pnpm instructions are flagged on #933, not
+  // edited here.
+  ':(glob)docs/**/*.md',
+  ':(glob)apps/*/docs/*.md',
+  ':(glob,exclude)docs/wayfinder/**',
 ];
 
 describe('§4.2 the workspace no longer instructs anyone through pnpm', () => {
