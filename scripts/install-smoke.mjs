@@ -549,6 +549,52 @@ try {
     );
   }
 
+  // ── the binary the image COPYs and the binary it STARTS must be one path ──
+  //
+  // The checks above observe the asset root and the absence of the standalone
+  // tree, but NOTHING observed the destination of the `COPY ${BINARY} <dest>`
+  // line — the thing the image actually runs. Retarget it (`/app/elsewhere`)
+  // and every check above stays green while the container execs a path no COPY
+  // produced: the #857 shape (build exits 0, entry missing) on the one path the
+  // smoke did not check.
+  //
+  // Both sides are READ FROM THE ARTIFACT, never restated here: the COPY
+  // destination and the exec-form CMD/ENTRYPOINT target are extracted from the
+  // generated Dockerfile and required to be the same path. A retarget of either
+  // side that leaves them disagreeing reds this gate.
+  const binaryCopy = scaffoldDockerfile.match(/^COPY\s+\$\{BINARY\}\s+(\S+)\s*$/m);
+  if (!binaryCopy) {
+    finish(
+      FAIL,
+      'the scaffolded Dockerfile has no `COPY ${BINARY} <dest>` line — the compiled server ' +
+        'binary is never placed into the image, so there is nothing for the CMD to start',
+    );
+  }
+  const binaryDest = binaryCopy[1];
+  // CMD or ENTRYPOINT in exec (JSON-array) form; its first element is the program.
+  const startExec = scaffoldDockerfile.match(/^(?:CMD|ENTRYPOINT)\s+(\[[^\]]*\])\s*$/m);
+  if (!startExec) {
+    finish(
+      FAIL,
+      'the scaffolded Dockerfile has no exec-form CMD/ENTRYPOINT — nothing declares which ' +
+        'binary the image runs',
+    );
+  }
+  let startTarget;
+  try {
+    startTarget = JSON.parse(startExec[1])[0];
+  } catch {
+    finish(FAIL, `the scaffolded Dockerfile's start directive is not valid JSON: ${startExec[1]}`);
+  }
+  if (startTarget !== binaryDest) {
+    finish(
+      FAIL,
+      `the scaffolded Dockerfile COPYs the server binary to ${binaryDest} but its ` +
+        `CMD/ENTRYPOINT starts ${startTarget} — the image would exec a path no COPY produced ` +
+        '(the #857 shape: build and image build both exit 0, the container starts nothing)',
+    );
+  }
+
   // --- 3b. CLI: exercise the config `validate` path (zero-exit assertion) ----
   // The deploy bin's validate path needs a built Next app + cluster, so it cannot give
   // a clean zero-exit here. Instead drive the SAME validateConfig() the bin uses via the
