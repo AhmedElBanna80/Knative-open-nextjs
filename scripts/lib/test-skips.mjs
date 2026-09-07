@@ -74,3 +74,97 @@ export function scanSkips(source) {
 export function skipCount(source) {
   return Object.values(scanSkips(source)).reduce((a, b) => a + b, 0);
 }
+
+/** The filesystem-existence probes that make a skip vanish when a BUILD ARTIFACT is absent. */
+const ARTIFACT_PROBE = /\b(existsSync|statSync|lstatSync)\s*\(/;
+
+/** Identifier characters, for extracting the names a predicate references. */
+const IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+
+/**
+ * Capture the balanced `(...)` argument that immediately follows `index`.
+ * `index` must point at the `(`. Returns the inner text (without the parens).
+ */
+function balancedArg(code, index) {
+  let depth = 0;
+  for (let i = index; i < code.length; i++) {
+    const ch = code[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return code.slice(index + 1, i);
+    }
+  }
+  return code.slice(index + 1);
+}
+
+/**
+ * Map every `const|let|var <id> = <rhs>;` in the (blanked) source to its RHS
+ * text, so a skip predicate that names a variable can be traced to what that
+ * variable was computed from.
+ */
+function assignments(code) {
+  const map = new Map();
+  const re = /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/g;
+  for (const m of code.matchAll(re)) {
+    const rhsStart = (m.index ?? 0) + m[0].length;
+    const semi = code.indexOf(';', rhsStart);
+    const rhs = code.slice(rhsStart, semi === -1 ? code.length : semi);
+    map.set(m[1], rhs);
+  }
+  return map;
+}
+
+/** Does this identifier trace (within `depth` hops) to an artifact-existence probe? */
+function identIsArtifactDerived(id, assigns, depth, seen) {
+  if (seen.has(id)) return false;
+  seen.add(id);
+  const rhs = assigns.get(id);
+  if (rhs === undefined) return false;
+  if (ARTIFACT_PROBE.test(rhs)) return true;
+  if (depth <= 0) return false;
+  for (const ref of rhs.match(IDENT) ?? []) {
+    if (ref !== id && identIsArtifactDerived(ref, assigns, depth - 1, seen)) return true;
+  }
+  return false;
+}
+
+/**
+ * Count the conditional (`*.skipIf`) skips whose predicate depends on the
+ * existence of a BUILD ARTIFACT — the skips that report the same green as a
+ * passing test wherever the artifact was not built (#932). Env/availability
+ * gates (`!bun`, a docker probe, an env var) are deliberately NOT counted: they
+ * are a different class with their own lanes, and conflating them would demand a
+ * build lane for a skip that gates on a runtime instead.
+ *
+ * Predicate-aware, tracing named variables one hop back to their assignment, so
+ * `it.skipIf(skipReason !== null)` where `const skipReason = existsSync(...) ?`
+ * is caught while `it.skipIf(!bun)` is not. A predicate that probes the
+ * filesystem inline counts directly.
+ *
+ * @param {string} source
+ * @returns {number}
+ */
+export function artifactGatedSkipCount(source) {
+  const code = blankNonCode(source);
+  const assigns = assignments(code);
+  let count = 0;
+  for (const form of CONDITIONAL_FORMS) {
+    const re = new RegExp(`(?<![.\\w$])${form.replace('.', '\\.')}\\s*\\(`, 'g');
+    for (const m of code.matchAll(re)) {
+      const openParen = (m.index ?? 0) + m[0].length - 1;
+      const predicate = balancedArg(code, openParen);
+      let gated = ARTIFACT_PROBE.test(predicate);
+      if (!gated) {
+        for (const id of predicate.match(IDENT) ?? []) {
+          if (identIsArtifactDerived(id, assigns, 3, new Set())) {
+            gated = true;
+            break;
+          }
+        }
+      }
+      if (gated) count++;
+    }
+  }
+  return count;
+}

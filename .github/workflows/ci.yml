@@ -1343,6 +1343,22 @@ jobs:
         working-directory: examples/bun-exec
         run: bun run test:image
 
+      # #932: the `test:image` step above runs `./build.sh`, which emits
+      # `examples/bun-exec/.output` on the host. That is the only CI lane that
+      # materialises it, so the artifact-contract-reality check runs HERE, with
+      # KNEXT_REQUIRE_OUTPUT=1 so an absent `.output` is a hard FAILURE rather
+      # than the silent green-by-skip #932 is about. The flag turns the file's
+      # `it.skipIf` into a fail-closed assertion; without a lane that both sets
+      # the flag and builds the artifact it would be the #408 defect (a flag CI
+      # never sets), which tests/artifact-contract-reality-ci.test.ts guards.
+      # node + bun are both on ubuntu-latest already; scripts/bun-test.mjs runs
+      # the one bun:test file in its own process and exits non-zero on an empty
+      # selection, so a renamed path fails loudly rather than skipping.
+      - name: Artifact contract holds against the REAL built .output (#932)
+        env:
+          KNEXT_REQUIRE_OUTPUT: '1'
+        run: node scripts/bun-test.mjs packages/kn-next/src/__tests__/artifact-contract-reality.test.ts
+
   # ---------------------------------------------------------------------------
   # The compile-cache diagnostic's Bun probe (#309).
   #

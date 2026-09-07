@@ -494,11 +494,11 @@ describe("extractor guards (fail-first)", () => {
  *
  * SCOPE IS EVERY TRACKED `.md`/`.mdx`, deliberately. The first version of this
  * scanned `docs/ + apps/docs/content/ + README.md`, which SOUNDS exhaustive and
- * is not: it missed `apps/file-manager/README.md` (`knext_coldstart_*`) and
- * `apps/file-manager/docs/bytecode-cache-reuse-runbook.md`
- * (`kn_next_bytecode_cache_files_total`). A directory allowlist is the same
- * enumeration failure as a file list, one level up — so there is no allowlist.
- * Measured when widening: 291 tracked docs, 60 tokens (up from 22), all resolve.
+ * is not: it missed `apps/file-manager/README.md` (`knext_coldstart_*`), a
+ * nested app doc a directory allowlist never reaches. A directory allowlist is
+ * the same enumeration failure as a file list, one level up — so there is no
+ * allowlist. Measured when widening: 291 tracked docs, 60 tokens (up from 22),
+ * all resolve.
  */
 const DOC_FILES = execFileSync("git", ["ls-files"], {
     cwd: REPO_ROOT,
@@ -516,13 +516,10 @@ describe("every metric a DOC names is one something emits (S5)", () => {
         expect(DOC_FILES).toContain("apps/docs/content/docs/observability.mdx");
         expect(DOC_FILES).toContain("docs/observability/metrics.md");
         expect(DOC_FILES).toContain("docs/security/threat-model.md");
-        // The two the directory-scoped version missed. Asserted by name because
-        // they are the evidence that the scope had to widen — not because the
-        // scan needs a list.
+        // The nested app doc the directory-scoped version missed. Asserted by
+        // name because it is the evidence that the scope had to widen — not
+        // because the scan needs a list.
         expect(DOC_FILES).toContain("apps/file-manager/README.md");
-        expect(DOC_FILES).toContain(
-            "apps/file-manager/docs/bytecode-cache-reuse-runbook.md",
-        );
     });
 
     it("resolves every backticked knext metric name in every doc", () => {

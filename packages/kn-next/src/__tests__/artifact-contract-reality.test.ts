@@ -79,14 +79,35 @@ describe("#B3 the contract agrees with the vinext sample", () => {
         ).toBe(true);
     });
 
-    it.skipIf(!existsSync(join(SAMPLE, ".output")))(
+    // #932: this used to be `it.skipIf(!existsSync(.output))`, which reports the
+    // SAME green as a passing test wherever the sample was not built — the whole
+    // point of the file evaporating in silence. It is now fail-closed under a
+    // require-flag, following the `KNEXT_REQUIRE_STANDALONE`/`KNEXT_REQUIRE_BUN`/
+    // `KNEXT_REQUIRE_BUNDLE` idiom: when `KNEXT_REQUIRE_OUTPUT=1` the skip
+    // condition is forced false, so a missing `.output` FAILS instead of
+    // vanishing. The lane that sets the flag (`bun-exec-alpine-image`, which runs
+    // `./build.sh` and so materialises `examples/bun-exec/.output`) is what makes
+    // the predicate true where it counts — and `tests/artifact-contract-reality-ci.test.ts`
+    // asserts that lane both sets the flag AND builds the artifact, so the flag
+    // cannot exist while CI never sets it (#408 class).
+    const REQUIRE_OUTPUT = process.env.KNEXT_REQUIRE_OUTPUT === "1";
+    const outputBuilt = existsSync(join(SAMPLE, ".output"));
+
+    it.skipIf(!REQUIRE_OUTPUT && !outputBuilt)(
         "vinext's declared entry EXISTS in the sample's built output",
         () => {
+            // Fail-closed half: under the flag, an absent `.output` is a failure,
+            // never a skip. Off the flag (a clean local checkout) the whole case
+            // is skipped rather than run against a tree that was never built.
+            expect(
+                outputBuilt,
+                "KNEXT_REQUIRE_OUTPUT=1 but examples/bun-exec/.output is absent — the lane that " +
+                    "sets this flag must build it first (`./build.sh`). A green-by-skip here would be " +
+                    "the exact #932 defect this flag exists to close.",
+            ).toBe(true);
+
             // The strongest form: not "the recipe says so" but "the file is
-            // there". Skipped when the sample has not been built, because a
-            // clean checkout has no `.output` — but it must never be asserted
-            // vacuously, so the existence of `.output` is the skip condition
-            // rather than the existence of the entry itself.
+            // there".
             const declared = vinextBuilder.describeArtifact("/app").entry;
 
             expect(
