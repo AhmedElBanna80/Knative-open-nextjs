@@ -42,8 +42,12 @@
  *        marker is written, not by call-site discipline — and its absence is
  *        what let `kn-next build` mark a UUID no revision can protect.
  *   11.  A RESERVED name (`chunks`, `css`, `_vinext_fonts`, …) is accepted as a
- *        build id, so `--tag chunks` marks a prefix every build shares. The
- *        standalone write site has always refused this; the vinext one did not.
+ *        build id, so `--tag chunks` marks a prefix every build shares. BOTH
+ *        write sites — standalone and vinext — refuse this, and each refusal is
+ *        disarmed by its OWN row (anchored on that site's preceding comment), so
+ *        deleting EITHER refusal reds the prover. Two rows, not one: a single
+ *        ambiguous anchor spans both sites, fails the exactly-once preflight, and
+ *        would otherwise leave one site's refusal decorative.
  *   12.  A copy happens BEFORE the refusals, which leaks a full duplicate of
  *        the static tree per failed deploy — the cleanup keys off a staging dir
  *        that a throw never returns.
@@ -183,9 +187,23 @@ const MUTATIONS = [
   ],
   [
     UPLOAD,
-    'ROUND 3: a RESERVED name is accepted as a build id, marking a shared prefix',
-    '        if (RESERVED_STATIC_DIRS.has(buildId)) {\n',
-    '        if (false) {\n',
+    'ROUND 3: the STANDALONE write site accepts a RESERVED name as a build id',
+    // Two RESERVED refusals now exist (standalone + vinext), so the bare
+    // `if (RESERVED_STATIC_DIRS.has(buildId)) {` anchor spans both and fails the
+    // exactly-once preflight. Anchored on THIS site's preceding comment so it
+    // resolves to the standalone block alone; the vinext block has its own row.
+    '        // build shares — the max-blast-radius over-delete.\n        if (RESERVED_STATIC_DIRS.has(buildId)) {\n',
+    '        // build shares — the max-blast-radius over-delete.\n        if (false) {\n',
+    SPEC_STAGE,
+  ],
+  [
+    UPLOAD,
+    'ROUND 3: the VINEXT write site accepts a RESERVED name as a build id',
+    // The twin of the row above, anchored on the vinext block's preceding
+    // comment so each refusal is disarmed by exactly one row: deleting EITHER
+    // RESERVED check reds the prover, neither is decorative.
+    '        // pruner a licence to reap it — the max-blast-radius over-delete.\n        if (RESERVED_STATIC_DIRS.has(buildId)) {\n',
+    '        // pruner a licence to reap it — the max-blast-radius over-delete.\n        if (false) {\n',
     SPEC_STAGE,
   ],
   [
