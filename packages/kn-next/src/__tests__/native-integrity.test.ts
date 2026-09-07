@@ -28,7 +28,7 @@
  * are recorded.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import {
     existsSync,
@@ -71,6 +71,15 @@ function lockfile(overrides: Record<string, string | undefined> = {}): string {
     return `{\n  "lockfileVersion": 1,\n  "packages": {\n${lines.join("\n")}\n  }\n}\n`;
 }
 
+// Every scratch tree the fixtures below make, drained once the whole file is
+// done. The staged/app trees are read by the code under test after the factory
+// returns, so they cannot be removed at their creation site — the registry is
+// their always-run teardown.
+const scratchDirs: string[] = [];
+afterAll(() => {
+    for (const d of scratchDirs) rmSync(d, { recursive: true, force: true });
+});
+
 /** A staged `native/` tree in the layout the Dockerfile ships. */
 function stageNative(opts: { sharpVersion?: string } = {}): {
     dir: string;
@@ -78,6 +87,7 @@ function stageNative(opts: { sharpVersion?: string } = {}): {
     addon: string;
 } {
     const dir = mkdtempSync(join(tmpdir(), "knext-native-integrity-"));
+    scratchDirs.push(dir);
     const nativeDir = join(dir, "native");
 
     const sharpPkg = join(nativeDir, "sharp-linux-x64");
@@ -254,6 +264,7 @@ describe("native tree integrity manifest — staging", () => {
         // app with no sharp. That case has nothing to verify and must not
         // demand a lockfile it has no reason to read.
         const dir = mkdtempSync(join(tmpdir(), "knext-native-empty-"));
+        scratchDirs.push(dir);
         const nativeDir = join(dir, "native");
         mkdirSync(nativeDir, { recursive: true });
 
@@ -392,6 +403,7 @@ describe("stageSharpNative pins what it stages", () => {
      */
     function appTree(): string {
         const cwd = mkdtempSync(join(tmpdir(), "knext-stage-app-"));
+        scratchDirs.push(cwd);
         const img = join(
             cwd,
             "node_modules",
@@ -471,6 +483,7 @@ describe("stageSharpNative pins what it stages", () => {
         // manifest too, because "no manifest" is the shim's legacy-image signal
         // and an app that never had sharp must not look like a stripped tree.
         const cwd = mkdtempSync(join(tmpdir(), "knext-stage-nosharp-"));
+        scratchDirs.push(cwd);
         stageSharpNative(cwd);
         expect(readManifest(join(cwd, "native")).files).toEqual({});
     });

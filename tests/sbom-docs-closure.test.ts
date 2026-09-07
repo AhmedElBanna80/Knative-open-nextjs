@@ -26,9 +26,9 @@
  * same finding the old lockfile scan produced.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,21 @@ const read = (rel: string) => readFileSync(resolve(repoRoot, rel), 'utf8');
 
 const SCRIPT = 'scripts/sbom-docs-closure.mjs';
 const SBOM_REF = './.docs-closure/closure.cdx.json';
+
+// Every scratch tree these tests make — fake workspaces and generator output
+// dirs — drained once the file is done. The generator runs as a child process
+// over them, so they outlive any single statement and are removed here.
+const scratchDirs: string[] = [];
+afterAll(() => {
+  for (const d of scratchDirs) rmSync(d, { recursive: true, force: true });
+});
+
+/** A throwaway output path under a registered scratch dir. */
+function sbomOutPath(): string {
+  const outDir = mkdtempSync(join(tmpdir(), 'knext-sbom-out-'));
+  scratchDirs.push(outDir);
+  return join(outDir, 'closure.cdx.json');
+}
 
 /** Run the generator, returning its exit code and whether it wrote anything. */
 function runGenerator(workspace: string, out: string): { code: number; wrote: boolean } {
@@ -54,6 +69,7 @@ function runGenerator(workspace: string, out: string): { code: number; wrote: bo
 /** A throwaway workspace with `count` fake installed packages. */
 function fakeWorkspace(count: number): string {
   const root = mkdtempSync(join(tmpdir(), 'knext-sbom-'));
+  scratchDirs.push(root);
   const deps: Record<string, string> = {};
   for (let i = 0; i < count; i++) {
     const name = `pkg-${i}`;
@@ -75,21 +91,21 @@ describe('the docs-closure SBOM generator fails closed (#878)', () => {
     // zero components it exits 0. So an empty SBOM is a silent pass — the gate
     // reports no vulnerabilities and proves nothing. The generator must fail
     // before the file exists, or a later step scans something that looks clean.
-    const out = join(mkdtempSync(join(tmpdir(), 'knext-sbom-out-')), 'closure.cdx.json');
+    const out = sbomOutPath();
     const { code, wrote } = runGenerator(fakeWorkspace(0), out);
     expect(code).toBe(1);
     expect(wrote).toBe(false);
   });
 
   it('refuses a workspace that does not exist', () => {
-    const out = join(mkdtempSync(join(tmpdir(), 'knext-sbom-out-')), 'closure.cdx.json');
+    const out = sbomOutPath();
     const { code, wrote } = runGenerator(join(tmpdir(), 'knext-nope-does-not-exist'), out);
     expect(code).toBe(1);
     expect(wrote).toBe(false);
   });
 
   it('emits a scannable CycloneDX document for a plausible closure', () => {
-    const out = join(mkdtempSync(join(tmpdir(), 'knext-sbom-out-')), 'closure.cdx.json');
+    const out = sbomOutPath();
     const { code, wrote } = runGenerator(fakeWorkspace(60), out);
     expect(code).toBe(0);
     expect(wrote).toBe(true);
@@ -127,7 +143,7 @@ describe('the docs-closure SBOM generator fails closed (#878)', () => {
       join(vendored, 'package.json'),
       JSON.stringify({ name: 'picomatch', version: '2.3.1' }),
     );
-    const out = join(mkdtempSync(join(tmpdir(), 'knext-sbom-out-')), 'closure.cdx.json');
+    const out = sbomOutPath();
     runGenerator(root, out);
     const names = JSON.parse(readFileSync(out, 'utf8')).components.map(
       (c: { name: string }) => c.name,
@@ -146,7 +162,7 @@ describe('the docs-closure SBOM generator fails closed (#878)', () => {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     manifest.devDependencies = { 'only-a-dev-dep': '9.9.9' };
     writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
-    const out = join(mkdtempSync(join(tmpdir(), 'knext-sbom-out-')), 'closure.cdx.json');
+    const out = sbomOutPath();
     runGenerator(root, out);
     const names = JSON.parse(readFileSync(out, 'utf8')).components.map(
       (c: { name: string }) => c.name,
@@ -175,7 +191,7 @@ describe('the docs-closure SBOM generator fails closed (#878)', () => {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     manifest.dependencies['level-one'] = '1.0.0';
     writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
-    const out = join(mkdtempSync(join(tmpdir(), 'knext-sbom-out-')), 'closure.cdx.json');
+    const out = sbomOutPath();
     runGenerator(root, out);
     const names = JSON.parse(readFileSync(out, 'utf8')).components.map(
       (c: { name: string }) => c.name,

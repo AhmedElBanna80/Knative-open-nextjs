@@ -29,9 +29,9 @@
  *       the file's header comment and by nothing in the file.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -55,6 +55,14 @@ import {
 
 const HARNESS = resolve(import.meta.dirname, '../benchmarks/image-prewarm-oke');
 const read = (f: string) => readFileSync(resolve(HARNESS, f), 'utf8');
+
+// Every scratch tree the tests below make, drained once the file is done. Each
+// holds a child-process script or a stub PATH read across the test, so it is
+// removed here rather than at its use site.
+const scratchDirs: string[] = [];
+afterAll(() => {
+  for (const d of scratchDirs) rmSync(d, { recursive: true, force: true });
+});
 
 /**
  * Every executable source in the harness TREE, harness-relative, recursively.
@@ -610,6 +618,7 @@ describe('an INTERRUPTED run restores the pre-run imagePrewarm state (A2)', () =
     // sends the actual signal to an actual node process running the actual
     // `withRestore`, with the "cluster" being a file on disk.
     const dir = mkdtempSync(join(tmpdir(), 'prewarm-sigint-'));
+    scratchDirs.push(dir);
     const statePath = join(dir, 'imagePrewarm');
     const readyPath = join(dir, 'ready');
     writeFileSync(statePath, 'false');
@@ -670,6 +679,7 @@ describe('an INTERRUPTED run restores the pre-run imagePrewarm state (A2)', () =
     // disposition and kills the process mid-write: the file stays 'true' and
     // nothing is logged. With it after, the same signal is harmless.
     const dir = mkdtempSync(join(tmpdir(), 'prewarm-sigint-restore-'));
+    scratchDirs.push(dir);
     const statePath = join(dir, 'imagePrewarm');
     const restoringPath = join(dir, 'restoring');
     writeFileSync(statePath, 'false');
@@ -746,6 +756,7 @@ describe('the settle floor is symmetric across arms (F)', () => {
     // which the two arms differ ONLY in time at zero, and require both figures
     // to appear in its output.
     const dir = mkdtempSync(join(tmpdir(), 'prewarm-analyze-'));
+    scratchDirs.push(dir);
     const file = join(dir, 'results.jsonl');
     const row = (mode: string, atZero: number, idx: number) => ({
       ts: '2026-08-05T00:00:00Z',
@@ -798,6 +809,7 @@ describe('every value interpolated into the nodesh pod spec is validated (E3)', 
    */
   const stubs = () => {
     const dir = mkdtempSync(join(tmpdir(), 'nodesh-'));
+    scratchDirs.push(dir);
     const applied = join(dir, 'applied.yaml');
     writeFileSync(
       join(dir, 'kubectl'),
