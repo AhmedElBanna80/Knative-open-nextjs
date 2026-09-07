@@ -265,6 +265,27 @@ const NO_TEST_FILES = /No test files found/;
 /** A collection summary — vitest got as far as loading at least one file. */
 const TEST_FILES_SUMMARY = /Test Files\s+\d+/;
 
+/* ── #960: the gate specs migrated to bun:test, and `runGateTest` dispatches
+ * through `scripts/bun-test.mjs` for them. Its output is not vitest's, so the
+ * "did it run / how many / did it collect" detection needs bun equivalents
+ * alongside the vitest ones. Measured against bun 1.4.0 through bun-test.mjs
+ * under `-t`:
+ *   header:   `bun test — 1 file(s), …`
+ *   per file: `  ok   [1/1] tests/foo.test.ts`  (or `FAIL [1/1] …`)
+ *   summary:  ` 1 pass` / ` 0 fail`  (forwarded per-child only under `-t`)
+ *   no file:  `no test files matched`  (bun-test.mjs, exit 1)
+ * Both formats are parsed rather than branching on framework, so a GATES set
+ * that is half-migrated is read correctly either way. */
+
+/** bun-test.mjs's header line — the bun analogue of vitest's RUN banner. */
+const BUN_BANNER = /\bbun test\b[^\n]*\bfile\(s\)/;
+
+/** bun-test.mjs got as far as loading at least one file. */
+const BUN_COLLECTED = /(?:\bok|\bFAIL)\s+\[\d+\/\d+\]|\btest file\(s\) green/;
+
+/** What bun-test.mjs prints when its filter matches no file. */
+const BUN_NO_TEST_FILES = /no test files matched/;
+
 /**
  * Run the ONE blocking-gate assertion in `spec`.
  *
@@ -276,8 +297,22 @@ const TEST_FILES_SUMMARY = /Test Files\s+\d+/;
  * branch deciding the cause on too little evidence.
  */
 export function runGateTest(repoRoot, spec, name = GATE_TEST_NAME) {
-  const runner = resolveTestRunner(repoRoot);
-  const res = spawnSync(runner.command, [...runner.args, 'run', spec, '-t', name], {
+  // #960: dispatch per spec FRAMEWORK. `resolveTestRunner` resolves vitest,
+  // which collects NOTHING from a bun:test file — and the GATES specs have all
+  // migrated, so an unconditional vitest run reported `ran === 0` for every one
+  // and reddened the whole prover lane. `resolveSpecRunner` routes bun:test
+  // specs to `scripts/bun-test.mjs`. A spec that has MOVED cannot be read to
+  // detect its framework, so fall back to the vitest resolver — `existsSync`
+  // still attributes that as spec-not-collected (`diagnoseNothingRan`), which is
+  // the correct cause, rather than crashing on the read.
+  const runner = existsSync(resolve(repoRoot, spec))
+    ? resolveSpecRunner(repoRoot, spec)
+    : {
+        ...resolveTestRunner(repoRoot),
+        runArgs: (s, testName) =>
+          testName !== undefined ? ['run', s, '-t', testName] : ['run', s],
+      };
+  const res = spawnSync(runner.command, [...runner.args, ...runner.runArgs(spec, name)], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
@@ -287,14 +322,22 @@ export function runGateTest(repoRoot, spec, name = GATE_TEST_NAME) {
   // to a deliberate ANSI strip.
   const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
   const out = `${res.stdout ?? ''}${res.stderr ?? ''}`.replace(ansi, '');
-  const passed = Number(out.match(/Tests\s+(\d+) passed/)?.[1] ?? 0);
-  const failed = Number(out.match(/Tests\s+.*?(\d+) failed/)?.[1] ?? 0);
-  const collected = TEST_FILES_SUMMARY.test(out);
-  const noTestFiles = NO_TEST_FILES.test(out);
-  // `launched` = the runner produced recognisable vitest output. A run whose
-  // filter matched nothing HAS launched; conflating that with a dead runner is
-  // the third misattribution #680 closed.
-  const launched = RUNNER_BANNER.test(out) || collected || noTestFiles;
+  // Both runners' pass/fail counts: vitest `Tests N passed`, bun ` N pass`
+  // (forwarded per-child by bun-test.mjs under `-t`). A `-t` matching nothing is
+  // ` 0 pass` / ` 0 fail` in bun, i.e. `ran === 0` WITH the file collected —
+  // exactly the renamed-assertion signal `diagnoseNothingRan` needs.
+  const passed = Number(
+    out.match(/Tests\s+(\d+) passed/)?.[1] ?? out.match(/^\s*(\d+) pass\b/m)?.[1] ?? 0,
+  );
+  const failed = Number(
+    out.match(/Tests\s+.*?(\d+) failed/)?.[1] ?? out.match(/^\s*(\d+) fail\b/m)?.[1] ?? 0,
+  );
+  const collected = TEST_FILES_SUMMARY.test(out) || BUN_BANNER.test(out) || BUN_COLLECTED.test(out);
+  const noTestFiles = NO_TEST_FILES.test(out) || BUN_NO_TEST_FILES.test(out);
+  // `launched` = the runner produced recognisable output. A run whose filter
+  // matched nothing HAS launched; conflating that with a dead runner is the
+  // third misattribution #680 closed.
+  const launched = RUNNER_BANNER.test(out) || BUN_BANNER.test(out) || collected || noTestFiles;
   return {
     ok: res.status === 0,
     ran: passed + failed,
