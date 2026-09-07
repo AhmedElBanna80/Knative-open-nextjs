@@ -21,6 +21,7 @@ import {
     existsSync,
     mkdirSync,
     mkdtempSync,
+    rmSync,
     symlinkSync,
     writeFileSync,
 } from "node:fs";
@@ -45,11 +46,20 @@ if (
 ) {
     console.error("deploy failed — run `pnpm --filter @getknext/core build` first");
     console.error((dep.stderr || "").split("\n").slice(-6).join("\n"));
+    // Early exit before `runner` exists: remove the one scratch tree we made so
+    // the failure path leaks nothing either.
+    rmSync(deploy, { recursive: true, force: true });
     process.exit(2);
 }
 
 // 2. Runner dir whose node_modules/@getknext/core -> the deploy (one resolvable core).
 const runner = mkdtempSync(join(tmpdir(), "knext-cs-runner-"));
+// Both scratch trees are torn down whenever this process ends — normal exit,
+// an explicit process.exit, or an uncaught throw all fire "exit".
+process.on("exit", () => {
+    rmSync(deploy, { recursive: true, force: true });
+    rmSync(runner, { recursive: true, force: true });
+});
 mkdirSync(join(runner, "node_modules", "@getknext"), { recursive: true });
 symlinkSync(deploy, join(runner, "node_modules", "@getknext", "core"));
 

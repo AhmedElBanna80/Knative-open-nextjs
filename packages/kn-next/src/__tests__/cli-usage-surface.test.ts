@@ -16,6 +16,7 @@
  */
 
 import {
+    afterAll,
     afterEach,
     beforeEach,
     describe,
@@ -24,9 +25,17 @@ import {
     mock,
     spyOn,
 } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Every scratch dir these usage tests chdir into, drained once the file is done.
+// Each test restores the cwd in its own `afterEach`, so by the time this runs we
+// are no longer inside any of them.
+const scratchDirs: string[] = [];
+afterAll(() => {
+    for (const d of scratchDirs) rmSync(d, { recursive: true, force: true });
+});
 
 const loadConfig = (() => mock())();
 const __knextReal1 = { ...(await import("../cli/shared")) };
@@ -312,6 +321,7 @@ describe("createMain — usage rejections are messages, real failures still log"
 
     it("rejects an extra positional rather than scaffolding somewhere unintended", async () => {
         const dir = mkdtempSync(join(tmpdir(), "knext-create-extra-"));
+        scratchDirs.push(dir);
         process.chdir(dir);
         const err = captureStderr();
         const out = captureStdout();
@@ -326,6 +336,7 @@ describe("createMain — usage rejections are messages, real failures still log"
 
     it("renders an invalid app name as a plain message with no serialised Error", async () => {
         const dir = mkdtempSync(join(tmpdir(), "knext-create-badname-"));
+        scratchDirs.push(dir);
         process.chdir(dir);
         const err = captureStderr();
         const out = captureStdout();
@@ -349,7 +360,9 @@ describe("statusMain / parseRollbackArgs / parsePreviewArgs usage rejections", (
     afterEach(() => process.chdir(savedCwd));
 
     it("statusMain refuses when there is no app name and no config", async () => {
-        process.chdir(mkdtempSync(join(tmpdir(), "knext-status-noapp-")));
+        const dir = mkdtempSync(join(tmpdir(), "knext-status-noapp-"));
+        scratchDirs.push(dir);
+        process.chdir(dir);
         await expect(statusMain([])).rejects.toMatchObject({
             code: USAGE_ERROR_CODE,
             message: expect.stringContaining("app name required"),
@@ -369,6 +382,7 @@ describe("statusMain / parseRollbackArgs / parsePreviewArgs usage rejections", (
         // (./doctor — the dep statusMain actually wires) is mocked to fail
         // fast, so it gets past the usage stage without spawning anything.
         const dir = mkdtempSync(join(tmpdir(), "knext-status-config-"));
+        scratchDirs.push(dir);
         writeFileSync(join(dir, "kn-next.config.ts"), "export default {};\n");
         process.chdir(dir);
         runCapture.mockReturnValue("");

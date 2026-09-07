@@ -76,21 +76,29 @@ describe("both validation mirrors accept an absent storage (condition 2)", () =>
 
     it("loader.ts: a config module without storage loads clean", async () => {
         const dir = mkdtempSync(join(loaderTmpRoot, "nostorage-"));
-        const file = join(dir, "kn-next.config.mjs");
-        writeFileSync(
-            file,
-            "export default { name: 'starter', registry: 'ghcr.io/someone' };\n",
-        );
-        const cfg = await loaderLoadConfig(file);
-        expect(cfg.name).toBe("starter");
-        expect(cfg.storage).toBeUndefined();
+        try {
+            const file = join(dir, "kn-next.config.mjs");
+            writeFileSync(
+                file,
+                "export default { name: 'starter', registry: 'ghcr.io/someone' };\n",
+            );
+            const cfg = await loaderLoadConfig(file);
+            expect(cfg.name).toBe("starter");
+            expect(cfg.storage).toBeUndefined();
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it("loader.ts: name and registry are still required", async () => {
         const dir = mkdtempSync(join(loaderTmpRoot, "invalid-"));
-        const file = join(dir, "kn-next.config.mjs");
-        writeFileSync(file, "export default { name: 'starter' };\n");
-        await expect(loaderLoadConfig(file)).rejects.toThrow(/registry/);
+        try {
+            const file = join(dir, "kn-next.config.mjs");
+            writeFileSync(file, "export default { name: 'starter' };\n");
+            await expect(loaderLoadConfig(file)).rejects.toThrow(/registry/);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 });
 
@@ -267,6 +275,9 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+    // Remove the scaffold tree by its own binding, then the shared parent — both
+    // are torn down, and the per-binding removal is what pairs the `root` create.
+    rmSync(root, { recursive: true, force: true });
     rmSync(loaderTmpRoot, { recursive: true, force: true });
 });
 

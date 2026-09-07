@@ -135,6 +135,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -536,10 +537,19 @@ function sleepSync(ms) {
  * request, and the failure is invisible (it looks like a transport error, or on
  * an allow-listed repo like the 403 this exists to route around).
  */
+/**
+ * Every scratch directory this run makes, drained in a `finally` when the script
+ * is invoked directly (see the bottom of the file). Scratch dirs are cached and
+ * reused across the whole run — the anonymous git cwd and each fetched commit
+ * tree — so they cannot be removed at their use site; the registry is the
+ * always-run teardown for the lot.
+ */
+const scratchDirs = [];
 let anonymousGitCwd;
 function anonymousGitDir() {
   if (!anonymousGitCwd) {
     anonymousGitCwd = mkdtempSync(join(tmpdir(), 'knext-verify-action-pins-'));
+    scratchDirs.push(anonymousGitCwd);
   }
   return anonymousGitCwd;
 }
@@ -790,6 +800,7 @@ export function gitCatFile({
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (attempt > 0) sleep(2_000);
       const dir = mkdtempSync(join(tmpdir(), 'knext-action-metadata-'));
+      scratchDirs.push(dir);
       const init = run(['init', '--quiet', dir]);
       if (init.status !== 0) {
         outcome = {
@@ -1671,5 +1682,8 @@ if (invokedDirectly()) {
     // it must still exit NON-ZERO — a checker that cannot run is never a pass.
     console.error(`✖ verify-action-pins failed to complete: ${error?.stack ?? error}`);
     process.exitCode = 1;
+  } finally {
+    // Always-run teardown for every scratch tree this run made.
+    for (const d of scratchDirs) rmSync(d, { recursive: true, force: true });
   }
 }

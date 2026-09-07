@@ -27,7 +27,7 @@
  * bun IS on PATH (the ordinary local case) these run regardless of the flag.
  */
 
-import { describe, expect, it, setDefaultTimeout } from "bun:test";
+import { afterAll, describe, expect, it, setDefaultTimeout } from "bun:test";
 
 // bun IGNORES `describe(name, { timeout }, fn)` — the options object is
 // accepted and silently DROPPED. Measured: a 50ms suite timeout let a 400ms
@@ -36,7 +36,7 @@ import { describe, expect, it, setDefaultTimeout } from "bun:test";
 setDefaultTimeout(30_000);
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,8 +114,17 @@ function bunOnPath(): string | null {
     return which.status === 0 && path.length > 0 ? path : null;
 }
 
+// Every scratch tree these helpers make, drained once the suite is done. The
+// harness entry dir and each healthy cache dir have to outlive the child process
+// that reads them, so they are removed in `afterAll`, not at their use site.
+const scratchDirs: string[] = [];
+afterAll(() => {
+    for (const d of scratchDirs) rmSync(d, { recursive: true, force: true });
+});
+
 function runHarness(bin: string, cacheDir: string): HarnessResult {
     const dir = mkdtempSync(join(tmpdir(), "knext-309-bunharness-"));
+    scratchDirs.push(dir);
     const entry = join(dir, "harness.ts");
     writeFileSync(entry, HARNESS);
     const stdout = execFileSync(bin, [entry], {
@@ -127,7 +136,9 @@ function runHarness(bin: string, cacheDir: string): HarnessResult {
 
 /** A real, writable, empty cache directory — the HEALTHY case. */
 function healthyCacheDir(): string {
-    return mkdtempSync(join(tmpdir(), "knext-309-healthy-cache-"));
+    const dir = mkdtempSync(join(tmpdir(), "knext-309-healthy-cache-"));
+    scratchDirs.push(dir);
+    return dir;
 }
 
 const bun = bunOnPath();

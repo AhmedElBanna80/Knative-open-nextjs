@@ -12,25 +12,16 @@
   },
   "unremovedTempDirs": {
     "recordedOn": "2026-09-07",
-    "note": "Unremoved `mkdtemp` sites, measured when the LIFETIME half of this guard landed (D9): originally 157 across 47 files. Burn-down tracked in #939 — the first pass paired 35 sites across 30 files with an `rmSync` (try/finally, an `afterAll`/`afterEach` drain over a registry, or a direct removal), leaving 122 across 17 files below. Each pairing shrank this ceiling in the SAME change that fixed it, because the guard reds a file that stopped leaking but stayed on the list. The remainder is deferred, not licensed: fixing every site means touching files across every package, and a guard that lands with its subject already red teaches people to disable it. This list is a CEILING: a file may only leak fewer than it does today, never more, and a file that stops leaking must leave the list. Nothing may be added to it — a new leak is a red, including a new leak in a file already here and a new leak that reuses a binding name already here. That last clause was FALSE when it was first written: a leak whose name collided with a drained iteration's loop element rode free, because that loop's own `rmSync(d)` was counted a second time as a direct removal. Measured against the pre-fix scan by appending a probe leak under each loop-element name: 12 (file, name) pairs, of which 8 were closed by excluding drain bodies from direct credit and 4 more needed that exclusion widened to loops over a non-identifier iterable (`of [appDir]`, `of dirs.splice(0)`). 0 remain. The guard proves the claim on the colliding name rather than on a name chosen to pass.",
+    "note": "Unremoved `mkdtemp` sites, measured when the LIFETIME half of this guard landed (D9): originally 157 across 47 files. Burn-down tracked in #939 — the first pass paired 35 sites across 30 files with an `rmSync`, leaving 122 across 17 files; a later pass burned 122 down to 92 across 8 files by pairing 30 more sites across 9 files (bench scripts, `verify-action-pins`, and the storage/native/usage/prewarm/sbom specs) with a try/finally, an `afterAll`/`afterEach` drain over a registry, or a direct removal. Each pairing shrank this ceiling in the SAME change that fixed it, because the guard reds a file that stopped leaking but stayed on the list. The remainder is deferred, not licensed: fixing every site means touching files across every package, and a guard that lands with its subject already red teaches people to disable it. This list is a CEILING: a file may only leak fewer than it does today, never more, and a file that stops leaking must leave the list. Nothing may be added to it — a new leak is a red, including a new leak in a file already here and a new leak that reuses a binding name already here. That last clause was FALSE when it was first written: a leak whose name collided with a drained iteration's loop element rode free, because that loop's own `rmSync(d)` was counted a second time as a direct removal. Measured against the pre-fix scan by appending a probe leak under each loop-element name: 12 (file, name) pairs, of which 8 were closed by excluding drain bodies from direct credit and 4 more needed that exclusion widened to loops over a non-identifier iterable (`of [appDir]`, `of dirs.splice(0)`). 0 remain. The guard proves the claim on the colliding name rather than on a name chosen to pass.",
     "files": {
       "apps/file-manager/shipped-runner.test.ts": 13,
-      "packages/kn-next/bench/boot-phase-trace.mjs": 2,
-      "packages/kn-next/bench/coldstart-supervisor-overhead.mjs": 2,
       "packages/kn-next/src/__tests__/cli-node-runtime.test.ts": 8,
-      "packages/kn-next/src/__tests__/cli-usage-surface.test.ts": 4,
-      "packages/kn-next/src/__tests__/compile-cache-health-bun.test.ts": 2,
       "packages/kn-next/src/__tests__/compile-cache-shadow-statsync-wiring.test.ts": 4,
       "packages/kn-next/src/__tests__/compile-cache-shadow.test.ts": 6,
-      "packages/kn-next/src/__tests__/native-integrity.test.ts": 4,
-      "packages/kn-next/src/__tests__/optional-storage.test.ts": 3,
       "packages/kn-next/src/__tests__/sandbox-fetch-realm-debug.test.ts": 9,
       "scripts/install-smoke.mjs": 6,
       "scripts/smoke-pack-cli.mjs": 4,
-      "scripts/verify-action-pins.mjs": 2,
-      "tests/action-pin-sha-tag-nightly.test.ts": 42,
-      "tests/image-prewarm-harness.test.ts": 4,
-      "tests/sbom-docs-closure.test.ts": 7
+      "tests/action-pin-sha-tag-nightly.test.ts": 42
     }
   }
 }
