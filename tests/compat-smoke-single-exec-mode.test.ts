@@ -21,14 +21,20 @@
  * `resolveSmokeMode` hard-coded to `true` would pass.
  */
 
-import { describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { resolveSmokeMode } from '../apps/file-manager/scripts/compat-smoke-mode.mjs';
 
+const tempDirs: string[] = [];
+afterAll(() => {
+  for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+});
+
 function stage(): { dir: string; binary: string } {
   const dir = mkdtempSync(join(tmpdir(), 'knext-smoke-mode-'));
+  tempDirs.push(dir);
   const binary = join(dir, 'knext-smoke-exec');
   writeFileSync(binary, '#!/bin/sh\nexit 0\n');
   return { dir, binary };

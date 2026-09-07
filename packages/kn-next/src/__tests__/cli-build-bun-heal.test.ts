@@ -23,6 +23,7 @@ import {
     mkdirSync,
     mkdtempSync,
     readFileSync,
+    rmSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -86,9 +87,12 @@ const FAKE_RD = {
     },
 };
 
+const tempDirs: string[] = [];
+
 /** A project dir shaped like an app AFTER `next build` (Node-traced tree). */
 function seedProject() {
     const projectDir = mkdtempSync(join(tmpdir(), "knext-cli-build-heal-"));
+    tempDirs.push(projectDir);
     writePkg(join(projectDir, "node_modules/fake-react-dom"), FAKE_RD, {
         "server.node.js": "module.exports = 'node';\n",
         "server.bun.js": "module.exports = 'bun';\n",
@@ -105,6 +109,8 @@ function seedProject() {
 
 afterEach(() => {
     jest.restoreAllMocks();
+    for (const d of tempDirs.splice(0))
+        rmSync(d, { recursive: true, force: true });
 });
 
 describe("kn-next build — bun-exports heal ships on the user build path (#188)", () => {
@@ -122,6 +128,7 @@ describe("kn-next build — bun-exports heal ships on the user build path (#188)
 
     it("survives a project without a standalone tree (no throw, build continues)", async () => {
         const projectDir = mkdtempSync(join(tmpdir(), "knext-cli-build-none-"));
+        tempDirs.push(projectDir);
         spyOn(process, "cwd").mockReturnValue(projectDir);
         await expect(build({ skipNextBuild: true })).resolves.toBeUndefined();
     });

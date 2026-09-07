@@ -20,12 +20,13 @@
  * rather than shipping an arbitrary directory as the context.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import {
     mkdirSync,
     mkdtempSync,
     readdirSync,
     readFileSync,
+    rmSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,9 +35,16 @@ import { fileURLToPath } from "node:url";
 import { resolveLayout } from "../cli/create";
 import { findTracingRoot, requireBuildContext } from "../cli/tracing-root";
 
+/** Every throwaway repo made below, drained in one afterAll. */
+const tempRoots: string[] = [];
+afterAll(() => {
+    for (const d of tempRoots) rmSync(d, { recursive: true, force: true });
+});
+
 /** A throwaway repo: `dirs` created, `files` written relative to its root. */
 function repo(files: Record<string, string>): string {
     const root = mkdtempSync(join(tmpdir(), "knext-root-"));
+    tempRoots.push(root);
     for (const [rel, contents] of Object.entries(files)) {
         const abs = join(root, rel);
         mkdirSync(resolve(abs, ".."), { recursive: true });

@@ -32,7 +32,13 @@ import { describe, expect, it, setDefaultTimeout } from "bun:test";
 setDefaultTimeout(30_000);
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdtempSync,
+    readdirSync,
+    readFileSync,
+    rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,6 +71,7 @@ describe("loadConfig marks a missing config as an expected state", () => {
             expect((err as { code?: string }).code).toBe(CONFIG_NOT_FOUND_CODE);
         } finally {
             process.chdir(cwd);
+            rmSync(dir, { recursive: true, force: true });
         }
     });
 });
@@ -201,17 +208,21 @@ describe("end-to-end: the real deploy entry in a directory with no config", () =
             return;
         }
         const dir = mkdtempSync(join(tmpdir(), "knext-noconfig-e2e-"));
-        const r = spawnSync(bun, [entry], {
-            cwd: dir,
-            encoding: "utf8",
-            env: { ...process.env, NO_COLOR: "1" },
-        });
-        const combined = `${r.stdout}${r.stderr}`;
-        expect(r.status).toBe(1);
-        expect(combined).toContain("kn-next.config.ts");
-        expect(combined).toContain("npx @getknext/core create");
-        expect(combined).toContain("https://knext.dev");
-        expect(combined).not.toContain("FATAL");
-        expect(combined).not.toMatch(STACK_FRAME_RE);
+        try {
+            const r = spawnSync(bun, [entry], {
+                cwd: dir,
+                encoding: "utf8",
+                env: { ...process.env, NO_COLOR: "1" },
+            });
+            const combined = `${r.stdout}${r.stderr}`;
+            expect(r.status).toBe(1);
+            expect(combined).toContain("kn-next.config.ts");
+            expect(combined).toContain("npx @getknext/core create");
+            expect(combined).toContain("https://knext.dev");
+            expect(combined).not.toContain("FATAL");
+            expect(combined).not.toMatch(STACK_FRAME_RE);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 });

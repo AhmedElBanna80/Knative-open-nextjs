@@ -1,4 +1,4 @@
-import { describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { afterAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 
 // bun IGNORES `describe(name, { timeout }, fn)` — the options object is
 // accepted and silently DROPPED. Measured: a 50ms suite timeout let a 400ms
@@ -7,7 +7,7 @@ import { describe, expect, it, setDefaultTimeout } from 'bun:test';
 setDefaultTimeout(30_000);
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { blankNonCode } from '../scripts/lib/blank-non-code.mjs';
@@ -37,6 +37,9 @@ import { auditBlockingGate, type BlockingGateOptions } from './helpers/blocking-
  */
 
 const TMP = mkdtempSync(join(tmpdir(), 'blocking-gate-'));
+afterAll(() => {
+  rmSync(TMP, { recursive: true, force: true });
+});
 let seq = 0;
 
 /** Audit a synthetic workflow's `gate` job. */

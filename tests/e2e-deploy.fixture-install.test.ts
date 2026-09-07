@@ -181,9 +181,8 @@ describe('scripts/e2e-deploy.sh — fixture-shipped node_modules survive the tar
         timeout: 20000,
       });
     }
-    for (const d of [appDir, stageDir]) {
-      if (d && existsSync(d)) rmSync(d, { recursive: true, force: true });
-    }
+    if (appDir && existsSync(appDir)) rmSync(appDir, { recursive: true, force: true });
+    if (stageDir && existsSync(stageDir)) rmSync(stageDir, { recursive: true, force: true });
   });
 
   it('deploy still emits exactly one stdout line (the URL)', () => {

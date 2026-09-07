@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'bun:test';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -154,6 +154,9 @@ describe('the unconverted-guard triage checks itself', () => {
  */
 describe('classifyTriggerShape', () => {
   const TMP = mkdtempSync(join(tmpdir(), 'triage-shape-'));
+  afterAll(() => {
+    rmSync(TMP, { recursive: true, force: true });
+  });
   let seq = 0;
 
   /** `on:` in its MAPPING form — the block is indented under a bare `on:`. */

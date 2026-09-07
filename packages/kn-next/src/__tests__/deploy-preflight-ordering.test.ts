@@ -342,6 +342,9 @@ describe("deploy — an unresolvable build context fails in preflight, before an
 
     afterEach(() => {
         process.chdir(savedCwd);
+        // The real fs — node:fs is mocked in this file — so the mkdtemp above
+        // does not leak one lockfile-free directory per test.
+        __knextRealFs.rmSync(lockfileFreeDir, { recursive: true, force: true });
     });
 
     it("throws before next build, the upload, the push and the apply", async () => {

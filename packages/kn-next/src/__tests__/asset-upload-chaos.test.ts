@@ -8,7 +8,7 @@ import {
     type Mock,
     mock,
 } from "bun:test";
-import { promises as fs } from "node:fs";
+import { promises as fs, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -71,6 +71,7 @@ function makeConfig(): StorageBackedConfig {
 
 describe("uploadAssets chaos: object-store loss fails LOUD", () => {
     let prevCwd: string;
+    let root: string;
     const localKeys = [
         "_next/static/buildX/main.js",
         "_next/static/css/app.css",
@@ -79,7 +80,7 @@ describe("uploadAssets chaos: object-store loss fails LOUD", () => {
 
     beforeEach(async () => {
         prevCwd = process.cwd();
-        const root = await fs.mkdtemp(join(tmpdir(), "knext-chaos-assets-"));
+        root = await fs.mkdtemp(join(tmpdir(), "knext-chaos-assets-"));
         // uploadAssets stages the standalone-build sources (.next/static +
         // public/) into .output/public itself — seed the real sources.
         for (const key of localKeys) {
@@ -92,6 +93,7 @@ describe("uploadAssets chaos: object-store loss fails LOUD", () => {
 
     afterEach(() => {
         process.chdir(prevCwd);
+        rmSync(root, { recursive: true, force: true });
         jest.clearAllMocks();
     });
 

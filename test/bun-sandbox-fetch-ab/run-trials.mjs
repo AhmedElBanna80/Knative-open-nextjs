@@ -15,7 +15,7 @@
  *     --fixture test/bun-sandbox-fetch-ab/fixture --out ab-results-bun.json
  */
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -61,9 +61,13 @@ const standaloneServer = join(fixtureDir, '.next/standalone/server.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Temp dirs to remove once the run is over. */
+const certDirs = [];
+
 /** Self-signed cert with an IP SAN for 127.0.0.1 (TLS stays in the path). */
 function makeCert() {
   const dir = mkdtempSync(join(tmpdir(), 'knext-ab-'));
+  certDirs.push(dir);
   const certPath = join(dir, 'cert.pem');
   const keyPath = join(dir, 'key.pem');
   execFileSync(
@@ -281,6 +285,8 @@ async function main() {
     // Never orphan children — even when a trial throws.
     if (server) server.kill('SIGKILL');
     echo.kill('SIGKILL');
+    // The self-signed CA is only needed for the lifetime of the run.
+    for (const dir of certDirs) rmSync(dir, { recursive: true, force: true });
   }
 
   const out = {

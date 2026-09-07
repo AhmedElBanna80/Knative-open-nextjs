@@ -12,8 +12,14 @@
  * from a comment.
  */
 
-import { describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { afterAll, describe, expect, it } from "bun:test";
+import {
+    existsSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse, parseAllDocuments } from "yaml";
@@ -122,7 +128,15 @@ describe("the generated workflow (#874)", () => {
 });
 
 describe("initCi writes both files (#874)", () => {
-    const scratch = () => mkdtempSync(join(tmpdir(), "knext-initci-"));
+    const tempRoots: string[] = [];
+    afterAll(() => {
+        for (const d of tempRoots) rmSync(d, { recursive: true, force: true });
+    });
+    const scratch = () => {
+        const dir = mkdtempSync(join(tmpdir(), "knext-initci-"));
+        tempRoots.push(dir);
+        return dir;
+    };
 
     it("writes the workflow and the RBAC manifest", () => {
         const root = scratch();

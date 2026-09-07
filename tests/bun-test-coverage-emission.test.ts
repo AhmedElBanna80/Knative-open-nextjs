@@ -15,7 +15,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { BUN_COVERAGE_DIR } from '../scripts/lib/coverage-policy.mjs';
@@ -65,25 +65,29 @@ describe('scripts/bun-test.mjs', () => {
     // Redirected: this file is itself in the suite, so a nested run writing to
     // the real pile would wipe an outer `--coverage` run's reports mid-flight.
     const dir = mkdtempSync(join(tmpdir(), 'knext-buncov-'));
-    const res = spawnSync(
-      process.execPath,
-      [
-        join(REPO_ROOT, 'scripts', 'bun-test.mjs'),
-        '--coverage',
-        'tests/lcov-merge.test.ts',
-        'tests/blank-non-code.test.ts',
-      ],
-      { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, KNEXT_BUN_COVERAGE_DIR: dir } },
-    );
+    try {
+      const res = spawnSync(
+        process.execPath,
+        [
+          join(REPO_ROOT, 'scripts', 'bun-test.mjs'),
+          '--coverage',
+          'tests/lcov-merge.test.ts',
+          'tests/blank-non-code.test.ts',
+        ],
+        { cwd: REPO_ROOT, encoding: 'utf8', env: { ...process.env, KNEXT_BUN_COVERAGE_DIR: dir } },
+      );
 
-    expect(res.status).toBe(0);
+      expect(res.status).toBe(0);
 
-    expect(existsSync(dir)).toBe(true);
-    const reports = readdirSync(dir).filter((f) => f.endsWith('.info'));
-    // Two files in, two reports out — no clobber.
-    expect(reports.length).toBeGreaterThanOrEqual(2);
-    for (const r of reports) {
-      expect(readFileSync(join(dir, r), 'utf8')).toMatch(/^SF:/m);
+      expect(existsSync(dir)).toBe(true);
+      const reports = readdirSync(dir).filter((f) => f.endsWith('.info'));
+      // Two files in, two reports out — no clobber.
+      expect(reports.length).toBeGreaterThanOrEqual(2);
+      for (const r of reports) {
+        expect(readFileSync(join(dir, r), 'utf8')).toMatch(/^SF:/m);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

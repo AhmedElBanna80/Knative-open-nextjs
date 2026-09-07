@@ -10,8 +10,8 @@
  * truth is the nightly's job, the LOGIC is this file's.
  */
 
-import { describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -371,9 +371,14 @@ describe('input existence — the verdict (#750)', () => {
 });
 
 describe('input existence — end to end over a scratch tree (#750)', () => {
+  const tempRoots: string[] = [];
+  afterAll(() => {
+    for (const d of tempRoots) rmSync(d, { recursive: true, force: true });
+  });
   /** A repo whose one workflow passes `bogus-input`; the api double declares only `severity`. */
   const scratchRepo = (withKey: string) => {
     const root = mkdtempSync(join(tmpdir(), 'knext-input-existence-'));
+    tempRoots.push(root);
     mkdirSync(join(root, '.github/workflows'), { recursive: true });
     const workflow = [
       'jobs:',

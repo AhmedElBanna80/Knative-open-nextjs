@@ -42,6 +42,7 @@ import {
     chmodSync,
     mkdtempSync,
     readdirSync,
+    rmSync,
     statSync,
     writeFileSync,
 } from "node:fs";
@@ -181,13 +182,14 @@ function fileCountRecursive(dir: string): number {
 }
 
 afterAll(() => {
-    // Restore modes so the runner can clean the temp dirs.
+    // Restore modes first so the removal below can descend into every dir.
     for (const dir of scratchDirs) {
         try {
             chmodSync(dir, 0o755);
         } catch {
             // best effort
         }
+        rmSync(dir, { recursive: true, force: true });
     }
 });
 

@@ -20,10 +20,10 @@
  *      at midnight, converting a documented debt into an outage.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -37,9 +37,15 @@ const SHIM = resolve(
   '../packages/kn-next/src/adapters/sharp-addon-dlopen.mjs',
 );
 
+const tempDirs: string[] = [];
+afterAll(() => {
+  for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+});
+
 /** A staged native tree with NO manifest — the pre-pinning image. */
 function stageUnpinned(): { dir: string; addon: string } {
   const dir = mkdtempSync(join(tmpdir(), 'knext-s2-unpinned-'));
+  tempDirs.push(dir);
   const lib = join(dir, 'native', 'sharp-linux-x64', 'lib');
   mkdirSync(lib, { recursive: true });
   const addon = join(lib, 'sharp-linux-x64.node');

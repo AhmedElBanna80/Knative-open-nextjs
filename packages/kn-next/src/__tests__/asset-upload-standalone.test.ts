@@ -8,7 +8,7 @@ import {
     type Mock,
     mock,
 } from "bun:test";
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync, promises as fs, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -102,6 +102,7 @@ describe("uploadAssets reads the standalone build output (not .output/public)", 
 
     afterEach(async () => {
         process.chdir(prevCwd);
+        rmSync(root, { recursive: true, force: true });
         jest.clearAllMocks();
     });
 

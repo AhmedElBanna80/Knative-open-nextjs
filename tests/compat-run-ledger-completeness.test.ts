@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildLedger, DEFAULT_OUT_FILE } from '../scripts/compat-run-ledger.mjs';
@@ -288,6 +288,10 @@ describe('#695 — the artifact path is one fact, shared with the workflow', () 
 });
 
 describe('#695 — end to end, in the shape the shard-ledger job runs it', () => {
+  const tempDirs: string[] = [];
+  afterAll(() => {
+    for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+  });
   /** Lay out a fake job workspace: `summaries/`, `fingerprint/`, and run the CLI. */
   function runCli(
     shards: Shard[],
@@ -296,6 +300,7 @@ describe('#695 — end to end, in the shape the shard-ledger job runs it', () =>
     fingerprintBody?: string | null,
   ) {
     const dir = mkdtempSync(join(tmpdir(), 'knext-ledger-'));
+    tempDirs.push(dir);
     mkdirSync(join(dir, 'summaries'));
     mkdirSync(join(dir, 'fingerprint'));
     for (const s of shards) {
