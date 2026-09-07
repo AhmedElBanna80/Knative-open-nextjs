@@ -14,10 +14,18 @@
 # upgrade clears does not.
 #
 # It reproduces only the OS-package layer. The app's pre-compile JS closure is
-# scanned by ci.yml's vinext-precompile-closure gate. The FROM digest and the
-# apk line are kept in lockstep with Dockerfile.node by
+# scanned by ci.yml's vinext-precompile-closure gate. The FROM digest, the apk
+# line and the npm/corepack strip are kept in lockstep with Dockerfile.node by
 # tests/built-image-trivy.test.ts (drift guard) and
 # tests/base-image-cve-hygiene.test.ts (whole-base upgrade).
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 
 RUN apk upgrade --no-cache
+
+# Mirror Dockerfile.node's strip of the base-bundled npm + corepack, so this
+# enforce-scan sees the SAME patched artifact users run. node:22-alpine's bundled
+# npm vendors HIGH/CRITICAL-carrying node_modules (tar, pacote, sigstore, ...) that
+# `apk upgrade` cannot touch; the runtime runs `node server.js` and needs no package
+# manager, so removing them clears the surface rather than allow-listing it.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
