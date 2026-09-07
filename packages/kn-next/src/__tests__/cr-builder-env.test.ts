@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { buildNextAppCRObject, renderNextAppCR } from "../cli/cr-builder";
 import type { KnativeNextConfig } from "../config";
+import {
+    extractReservedEnvNames,
+    reservedEnvNamesFromSource,
+} from "./helpers/crd-reserved-env";
 
 /**
  * #186 — plain (non-secret) env vars via spec.env.
@@ -144,13 +148,15 @@ describe("cr-builder spec.env NEXT_DEPLOYMENT_ID (T2d)", () => {
         // appendUserEnv drops a spec.env name that an operator-injected var
         // already owns. Injecting one of those would make every deploy either
         // fail admission or silently lose the entry.
-        const CRD_RESERVED = [
-            "HOSTNAME",
-            "PORT",
-            "K_SERVICE",
-            "K_REVISION",
-            "K_CONFIGURATION",
-        ];
+        //
+        // #922 — DERIVED from the CRD source of truth (the CEL rule in
+        // nextapp_types.go), never hand-copied. A reserved name added to the
+        // operator flows through here without touching this test; a stale
+        // literal would go green about a name the apiserver would reject.
+        const CRD_RESERVED = reservedEnvNamesFromSource();
+        // Non-vacuity guard: an empty derivation would let every name pass the
+        // `not.toContain` loop below (ACs of #922). Fail closed instead.
+        expect(CRD_RESERVED.length).toBeGreaterThan(0);
         const cr = buildNextAppCRObject(baseConfig(), IMG, "default", "tag-9");
         const names = Object.keys(
             (cr.spec as { env: Record<string, string> }).env,
@@ -167,5 +173,59 @@ describe("cr-builder spec.env NEXT_DEPLOYMENT_ID (T2d)", () => {
         const yaml = renderNextAppCR(baseConfig(), IMG, "default", "tag-9");
         expect(yaml).toContain("NEXT_DEPLOYMENT_ID");
         expect(yaml).toContain("tag-9");
+    });
+});
+
+/**
+ * #922 — the reserved-env list used above is DERIVED from the operator's CEL
+ * rule, so it cannot drift out of sync with what the apiserver rejects. These
+ * tests pin the derivation itself: that it tracks the real source, that a CRD
+ * change flows through it, and that it fails rather than passes when empty.
+ */
+describe("CRD reserved-env derivation (#922)", () => {
+    // Canary anchored to the CURRENT operator rule. If the CEL rule gains or
+    // loses a reserved name, the derived set changes and this reds — forcing a
+    // conscious update here instead of silent drift. This is the alarm, not the
+    // source of truth: the reserved check above consumes the derived list.
+    const KNOWN_CURRENT = [
+        "HOSTNAME",
+        "PORT",
+        "K_SERVICE",
+        "K_REVISION",
+        "K_CONFIGURATION",
+    ];
+
+    it("derives exactly the current reserved set from the real Go source", () => {
+        const derived = reservedEnvNamesFromSource();
+        expect([...derived].sort()).toEqual([...KNOWN_CURRENT].sort());
+    });
+
+    it("a reserved name added to the CEL rule flows through the derivation", () => {
+        // Mutation-proof: feed the extractor a COPY of the rule with an extra
+        // clause (as a real operator change would look) and confirm the derived
+        // list GROWS to include it — i.e. a CRD change is caught, not missed.
+        // The real file is never modified; the extractor tracks the real file.
+        const withNewReserved = `// +kubebuilder:validation:XValidation:rule="!('HOSTNAME' in self) && !('PORT' in self) && !('K_SERVICE' in self) && !('K_REVISION' in self) && !('K_CONFIGURATION' in self) && !('K_SINK' in self)",message="reserved"`;
+        const derived = extractReservedEnvNames(withNewReserved);
+        expect(derived).toContain("K_SINK");
+        expect(derived).toEqual([...KNOWN_CURRENT, "K_SINK"]);
+
+        // ...and removing it again restores the current set — the extractor is
+        // reading the rule text, not remembering anything.
+        const withoutIt = withNewReserved.replace(
+            " && !('K_SINK' in self)",
+            "",
+        );
+        expect(extractReservedEnvNames(withoutIt).sort()).toEqual(
+            [...KNOWN_CURRENT].sort(),
+        );
+    });
+
+    it("derives an EMPTY set when the reserved clause is absent (non-vacuity)", () => {
+        // The sibling C_IDENTIFIER rule has no `!('NAME' in self)` clause, so a
+        // source carrying only it yields nothing — which is why the consumer
+        // above asserts length > 0 rather than trusting the loop.
+        const cIdentOnly = `// +kubebuilder:validation:XValidation:rule="self.all(k, k.matches('^[A-Za-z_][A-Za-z0-9_]*$'))",message="C_IDENTIFIER"`;
+        expect(extractReservedEnvNames(cIdentOnly)).toEqual([]);
     });
 });
