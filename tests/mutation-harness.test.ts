@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,8 +20,14 @@ import { MUTATION_MARKER, mutate, restore, snapshot } from '../scripts/lib/mutat
  * loud rather than green.
  */
 
+const tempDirs: string[] = [];
+afterAll(() => {
+  for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+});
+
 function tempFile(contents: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'knext-mutation-harness-'));
+  tempDirs.push(dir);
   const file = join(dir, 'subject.go');
   writeFileSync(file, contents, 'utf8');
   return file;

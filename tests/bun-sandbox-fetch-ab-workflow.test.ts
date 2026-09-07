@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -72,13 +72,17 @@ function artifact(runtime: string, outcomesPerTrial: Record<string, string>[]) {
 
 function runAggregate(nodeArtifact: unknown, bunArtifact: unknown): string {
   const dir = mkdtempSync(join(tmpdir(), 'knext-ab-agg-'));
-  const nodePath = join(dir, 'ab-results-node.json');
-  const bunPath = join(dir, 'ab-results-bun.json');
-  writeFileSync(nodePath, JSON.stringify(nodeArtifact));
-  writeFileSync(bunPath, JSON.stringify(bunArtifact));
-  return execFileSync('node', [AGGREGATE_PATH, '--node', nodePath, '--bun', bunPath], {
-    encoding: 'utf8',
-  });
+  try {
+    const nodePath = join(dir, 'ab-results-node.json');
+    const bunPath = join(dir, 'ab-results-bun.json');
+    writeFileSync(nodePath, JSON.stringify(nodeArtifact));
+    writeFileSync(bunPath, JSON.stringify(bunArtifact));
+    return execFileSync('node', [AGGREGATE_PATH, '--node', nodePath, '--bun', bunPath], {
+      encoding: 'utf8',
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe('bun-sandbox-fetch A/B workflow (discriminating-repro invariants)', () => {

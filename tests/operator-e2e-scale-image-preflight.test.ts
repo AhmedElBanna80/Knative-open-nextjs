@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -96,6 +96,8 @@ function runPreflightScript(env: Record<string, string>): {
       output: `${e.stdout ?? ''}${e.stderr ?? ''}`,
       githubOutput: readFileSync(outPath, 'utf8'),
     };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 

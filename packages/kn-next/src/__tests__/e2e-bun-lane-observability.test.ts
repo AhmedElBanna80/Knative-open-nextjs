@@ -15,9 +15,9 @@
  * teardown — failures carry the server-side exception, green files stay quiet.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -30,8 +30,14 @@ function runCleanup(cwd: string) {
     return spawnSync("bash", [CLEANUP], { cwd, encoding: "utf8" });
 }
 
+const tempDirs: string[] = [];
+afterAll(() => {
+    for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+});
+
 function seedAppDir(overrides: { serverLog?: string | null } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "knext-e2e-cleanup-"));
+    tempDirs.push(dir);
     const serverLogPath = join(dir, ".adapter-server.log");
     // No PID line on purpose: nothing to kill, deterministic teardown.
     writeFileSync(

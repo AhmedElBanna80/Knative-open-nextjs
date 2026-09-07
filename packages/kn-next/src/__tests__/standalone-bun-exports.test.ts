@@ -23,18 +23,24 @@
  * is untouched.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import {
     existsSync,
     mkdirSync,
     mkdtempSync,
     readFileSync,
+    rmSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { healBunExportTargets } from "../adapters/standalone-bun-exports";
+
+const tempRoots: string[] = [];
+afterAll(() => {
+    for (const d of tempRoots) rmSync(d, { recursive: true, force: true });
+});
 
 /** Lay down a fake package dir. */
 function writePkg(
@@ -72,6 +78,7 @@ function seed({
     standaloneVersion?: string;
 } = {}) {
     const root = mkdtempSync(join(tmpdir(), "knext-bun-exports-"));
+    tempRoots.push(root);
     const projectDir = join(root, "app");
 
     // the REAL installed package (ships the bun files)
@@ -149,6 +156,7 @@ describe("healBunExportTargets — standalone bun-condition export heal (#188)",
 
     it("never throws on a missing/absent standalone tree (build must not die)", () => {
         const root = mkdtempSync(join(tmpdir(), "knext-bun-exports-none-"));
+        tempRoots.push(root);
         expect(() =>
             healBunExportTargets({
                 projectDir: root,

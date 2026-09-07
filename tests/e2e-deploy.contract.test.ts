@@ -306,8 +306,8 @@ describe('scripts/e2e-deploy.sh — official deploy-script contract (#89)', () =
         timeout: 20000,
       });
     }
-    for (const d of [appDir]) {
-      if (d && existsSync(d)) rmSync(d, { recursive: true, force: true });
+    if (appDir && existsSync(appDir)) {
+      rmSync(appDir, { recursive: true, force: true });
     }
   });
 

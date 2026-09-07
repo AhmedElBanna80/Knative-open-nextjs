@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -44,6 +44,8 @@ function runOn(gate: Gate): number {
     return 0;
   } catch (e) {
     return (e as { status?: number }).status ?? 1;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 

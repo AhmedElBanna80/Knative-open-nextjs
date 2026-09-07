@@ -3,8 +3,8 @@
  * RED phase: these tests should fail before the adapter is implemented.
  */
 
-import { beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -212,8 +212,11 @@ describe('next-adapter upload (POC-ADAPTER-P1-rework)', () => {
     writeFileSync(prerenderPath, '<html>cached</html>');
   });
 
-  // No afterAll cleanup: temp files in /tmp are small and the OS cleans them.
-  // Explicit cleanup races with lazy createReadStream open → ENOENT errors.
+  // Cleanup runs only after every test in this describe has finished, so it
+  // cannot race the lazy createReadStream opens that happen during the tests.
+  afterAll(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   const makeCtx = (overrides: Record<string, unknown> = {}) => ({
     buildId: 'upload-test-id',

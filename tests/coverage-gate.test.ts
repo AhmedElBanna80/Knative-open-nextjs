@@ -16,7 +16,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { blankNonCode } from '../scripts/lib/blank-non-code.mjs';
@@ -41,18 +41,22 @@ function lcovAt(file: string, pct: number, total = 100): string {
 
 function runChecker(lcovs: string[]): number {
   const dir = mkdtempSync(join(tmpdir(), 'knext-cov-'));
-  const args = lcovs.map((text, i) => {
-    const p = join(dir, `r${i}.info`);
-    writeFileSync(p, `${text}\n`);
-    return `--lcov=${p}`;
-  });
-  const res = spawnSync(process.execPath, [CHECKER, ...args], {
-    cwd: REPO_ROOT,
-    encoding: 'utf8',
-  });
-  // A checker that cannot run at all must not read as a pass; surface it.
-  if (res.status === null) throw new Error(`checker did not exit: ${res.error?.message}`);
-  return res.status;
+  try {
+    const args = lcovs.map((text, i) => {
+      const p = join(dir, `r${i}.info`);
+      writeFileSync(p, `${text}\n`);
+      return `--lcov=${p}`;
+    });
+    const res = spawnSync(process.execPath, [CHECKER, ...args], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    });
+    // A checker that cannot run at all must not read as a pass; surface it.
+    if (res.status === null) throw new Error(`checker did not exit: ${res.error?.message}`);
+    return res.status;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 const CORE_GLOB = 'packages/kn-next/src/**';

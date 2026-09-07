@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { filterSbomToClosure, resolveAppClosure } from '../scripts/lib/bun-app-closure.mjs';
@@ -35,9 +35,15 @@ import { filterSbomToClosure, resolveAppClosure } from '../scripts/lib/bun-app-c
  * ADR-0042 C6 rests on is preserved.
  */
 
+const tempRoots: string[] = [];
+afterAll(() => {
+  for (const d of tempRoots) rmSync(d, { recursive: true, force: true });
+});
+
 /** A minimal bun-isolated-store fixture: app + store, symlinks and all. */
 function makeFixture(): { root: string; appDir: string } {
   const root = mkdtempSync(join(tmpdir(), 'knext-closure-'));
+  tempRoots.push(root);
   const store = join(root, 'node_modules', '.bun');
 
   const pkg = (dir: string, body: Record<string, unknown>) => {

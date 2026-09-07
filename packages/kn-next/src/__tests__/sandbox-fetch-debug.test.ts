@@ -232,22 +232,26 @@ describe("sandbox-fetch-debug — entry chain-loading (the bun -r quirk workarou
     // server.js, and the module chain-requires it into the main graph.
     it("as the main entry, requires KNEXT_SANDBOX_FETCH_DEBUG_SERVER_JS after installing", () => {
         const { execFileSync } = require("node:child_process");
-        const { mkdtempSync, writeFileSync } = require("node:fs");
+        const { mkdtempSync, rmSync, writeFileSync } = require("node:fs");
         const { tmpdir } = require("node:os");
         const { join } = require("node:path");
         const dir = mkdtempSync(join(tmpdir(), "sandbox-fetch-debug-"));
-        const chained = join(dir, "fake-server.cjs");
-        writeFileSync(chained, "console.log('CHAINED-SERVER-BOOTED');\n");
-        const out = execFileSync(process.execPath, [MODULE_PATH], {
-            encoding: "utf8",
-            env: {
-                ...process.env,
-                KNEXT_SANDBOX_FETCH_DEBUG: "1",
-                KNEXT_SANDBOX_FETCH_DEBUG_SERVER_JS: chained,
-            },
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        expect(out).toContain("CHAINED-SERVER-BOOTED");
+        try {
+            const chained = join(dir, "fake-server.cjs");
+            writeFileSync(chained, "console.log('CHAINED-SERVER-BOOTED');\n");
+            const out = execFileSync(process.execPath, [MODULE_PATH], {
+                encoding: "utf8",
+                env: {
+                    ...process.env,
+                    KNEXT_SANDBOX_FETCH_DEBUG: "1",
+                    KNEXT_SANDBOX_FETCH_DEBUG_SERVER_JS: chained,
+                },
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            expect(out).toContain("CHAINED-SERVER-BOOTED");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it("does NOT chain-require when loaded as a LIBRARY, even with the chain env set (behavioral)", () => {
@@ -257,27 +261,31 @@ describe("sandbox-fetch-debug — entry chain-loading (the bun -r quirk workarou
         // NOT boot. (A regression here would double-require server.js whenever
         // any tooling imports the module in a debug-configured environment.)
         const { execFileSync } = require("node:child_process");
-        const { mkdtempSync, writeFileSync } = require("node:fs");
+        const { mkdtempSync, rmSync, writeFileSync } = require("node:fs");
         const { tmpdir } = require("node:os");
         const { join } = require("node:path");
         const dir = mkdtempSync(join(tmpdir(), "sandbox-fetch-debug-lib-"));
-        const chained = join(dir, "fake-server.cjs");
-        writeFileSync(chained, "console.log('CHAINED-SERVER-BOOTED');\n");
-        const driver = join(dir, "driver.cjs");
-        writeFileSync(
-            driver,
-            `require(${JSON.stringify(MODULE_PATH)});\nconsole.log('LIBRARY-LOAD-OK');\n`,
-        );
-        const out = execFileSync(process.execPath, [driver], {
-            encoding: "utf8",
-            env: {
-                ...process.env,
-                KNEXT_SANDBOX_FETCH_DEBUG: "1",
-                KNEXT_SANDBOX_FETCH_DEBUG_SERVER_JS: chained,
-            },
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        expect(out).toContain("LIBRARY-LOAD-OK");
-        expect(out).not.toContain("CHAINED-SERVER-BOOTED");
+        try {
+            const chained = join(dir, "fake-server.cjs");
+            writeFileSync(chained, "console.log('CHAINED-SERVER-BOOTED');\n");
+            const driver = join(dir, "driver.cjs");
+            writeFileSync(
+                driver,
+                `require(${JSON.stringify(MODULE_PATH)});\nconsole.log('LIBRARY-LOAD-OK');\n`,
+            );
+            const out = execFileSync(process.execPath, [driver], {
+                encoding: "utf8",
+                env: {
+                    ...process.env,
+                    KNEXT_SANDBOX_FETCH_DEBUG: "1",
+                    KNEXT_SANDBOX_FETCH_DEBUG_SERVER_JS: chained,
+                },
+                stdio: ["ignore", "pipe", "pipe"],
+            });
+            expect(out).toContain("LIBRARY-LOAD-OK");
+            expect(out).not.toContain("CHAINED-SERVER-BOOTED");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 });
