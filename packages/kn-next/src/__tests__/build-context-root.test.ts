@@ -409,11 +409,10 @@ describe("#644 — no call site keeps its own root rule", () => {
  * BEFORE any lockfile search, and its own comment says why — lockfiles "can be
  * included in the application directory by accident".
  *
- * The consequence is not cosmetic. `create` bakes `standalonePrefix` into the
- * Dockerfile's two COPY sources, its WORKDIR, the CMD's STANDALONE_SERVER_PATH and
- * the app's `start` script. Compute it against a different root than Next uses and
- * every one of those points at a path the build never wrote — while `next build`
- * exits 0.
+ * The consequence is not cosmetic. `create` derives the docker build context and
+ * the baked install command from this root, and `deploy`/`preview` root the build
+ * there. Compute it against a different root than Next uses and the emitted
+ * artifacts point at paths the build never wrote — while `next build` exits 0.
  */
 describe("#857 — pnpm-workspace.yaml roots the trace, and it wins over lockfiles", () => {
     it("treats a pnpm-workspace.yaml ancestor as the root", () => {
@@ -606,14 +605,6 @@ describe("create resolves the root exactly as deploy does (#860, #861)", () => {
         expect(resolveLayout(appDir).root).toBe(requireBuildContext(appDir));
     });
 
-    it("bakes a standalone prefix relative to the root the build actually uses", () => {
-        const root = pinnedRepo();
-        const appDir = join(root, "proj/apps/a");
-        // Against the OUTER root the prefix was `proj/apps/a/` — a path the
-        // pinned build never writes, which is what makes the image break.
-        expect(resolveLayout(appDir).standalonePrefix).toBe("apps/a/");
-    });
-
     it("picks the install command from the pinned root, where the Dockerfile installs", () => {
         const root = pinnedRepo();
         // The context root carries `pnpm-lock.yaml`; the outer one carries an
@@ -652,6 +643,5 @@ describe("create resolves the root exactly as deploy does (#860, #861)", () => {
         const appDir = join(root, "a");
         expect(() => requireBuildContext(appDir)).toThrow();
         expect(resolveLayout(appDir).root).toBe(appDir);
-        expect(resolveLayout(appDir).standalonePrefix).toBe("");
     });
 });

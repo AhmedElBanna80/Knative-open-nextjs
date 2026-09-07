@@ -28,16 +28,6 @@ const SHAPE_SPEC = 'tests/install-smoke-coverage-derivation.test.ts';
 const NEWPUB_DIR = join(WT, 'packages', 'newpub');
 const LIB_PKG = join(WT, 'packages', 'lib', 'package.json');
 const LOCKSTEP_SPEC = 'tests/publish-preflight.test.ts';
-// #927: the spec that OWNS the standalone-prefix invariant. M13 used to be
-// graded by the install-smoke gate, which CANNOT observe it: no template
-// consumes `standalonePrefix` any more (measured — zero occurrences under
-// packages/kn-next/templates and turbo/generators/templates), so a prefix built
-// without its trailing slash changes no emitted artifact and the gate exits 0.
-// Same move M2 already made: when a gate stops being able to see a mutation,
-// the mutation follows the guard that owns the invariant rather than being
-// deleted. The prefix is still computed and still exported, so the invariant is
-// still real — see #931 for whether the surface should exist at all.
-const PREFIX_SPEC = 'packages/kn-next/src/__tests__/build-context-root.test.ts';
 // #927 round 2: the spec that OWNS the scaffolded `start` script (`:305`).
 // install-smoke asserts nothing about it — the gate runs `npm run build`, never
 // `npm start` — so M15 had no observer and SURVIVED once the run was honest.
@@ -51,7 +41,6 @@ const TEMPLATE_DIR = join(WT, 'packages', 'kn-next', 'templates', 'app');
 // subject this prover can mutate any more.
 const APP_PKG_TPL = join(TEMPLATE_DIR, 'package.json.hbs');
 const DOCKERFILE_TPL = join(TEMPLATE_DIR, 'Dockerfile.hbs');
-const CREATE_SRC = join(WT, 'packages', 'kn-next', 'src', 'cli', 'create.ts');
 const STASH = join(tmpdir(), 'knext-alias-shim-stash.js');
 /**
  * The paths this prover touches. The clean assertion is scoped to them, not
@@ -69,7 +58,6 @@ const MUTATED_PATHS = [
   'packages/lib/package.json',
   'packages/kn-next/templates/app',
   'packages/kn-next/src/adapters/next-adapter.ts',
-  'packages/kn-next/src/cli/create.ts',
 ];
 
 const git = (...a) => execFileSync('git', a, { cwd: WT, encoding: 'utf8' });
@@ -254,25 +242,16 @@ const MUTATIONS = [
       ),
     restore: () => git('checkout', '--', '.'),
   },
-  {
-    id: 'M13',
-    expect: 'red',
-    graded: 'prefix',
-    guard:
-      'create emits a prefix that is not slash-terminated — every consumer CONCATENATES it, ' +
-      'so the Dockerfile COPYs, the CMD and the start script all point at nothing',
-    // Review's RM1: this exact mutation PASSED before, printing
-    // `.next/standalone/scaffolded-appserver.js` — a file that never existed — as its
-    // evidence, because `path.join` normalised the missing separator back in.
-    apply: (checkOnly) =>
-      mutate(
-        CREATE_SRC,
-        '!rel || rel.startsWith("..") ? "" : `${rel.split(sep).join("/")}/`;',
-        '!rel || rel.startsWith("..") ? "" : `${rel.split(sep).join("/")}`;',
-        checkOnly,
-      ),
-    restore: () => git('checkout', '--', '.'),
-  },
+  // ── M13 RETIRED (#931) ────────────────────────────────────────────────────
+  //
+  // It mutated the trailing slash off `create.ts`'s `standalonePrefix` and was
+  // graded by `build-context-root.test.ts` after #927 measured that no gate
+  // could observe it (zero template consumers). #931 removed the surface itself
+  // — the computation, the `standalonePrefixFor` export, and the specs that
+  // asserted the value — so there is no subject left to mutate. Retired rather
+  // than repointed, per the convention M16–M22 established below: inventing a
+  // replacement to keep the count up would be the decoration this prover is
+  // supposed to detect.
   {
     id: 'M14',
     expect: 'red',
@@ -431,12 +410,6 @@ if (ncScaffold !== 0) {
   );
   process.exit(1);
 }
-const ncPrefix = runSpec(PREFIX_SPEC);
-console.log(`NC(prefix) exit=${ncPrefix}`);
-if (ncPrefix !== 0) {
-  console.error('ABORT: the prefix spec is red before any mutation — M13 would grade meaningless.');
-  process.exit(1);
-}
 const nc = runSmoke();
 console.log(`NC exit=${nc}`);
 if (nc !== 0) {
@@ -457,11 +430,9 @@ for (const m of MUTATIONS) {
       ? runSpec(SHAPE_SPEC)
       : m.graded === 'scaffold'
         ? runSpec(SCAFFOLD_SPEC)
-        : m.graded === 'prefix'
-          ? runSpec(PREFIX_SPEC)
-          : m.graded === 'lockstep'
-            ? runSpec(LOCKSTEP_SPEC)
-            : runSmoke();
+        : m.graded === 'lockstep'
+          ? runSpec(LOCKSTEP_SPEC)
+          : runSmoke();
   recordMutation();
   m.restore();
   clean(`after ${m.id}`);
