@@ -135,3 +135,47 @@ describe('#981 — the two shipped images are Trivy-scanned as BUILT, enforce-on
     });
   }
 });
+
+/**
+ * #703 — the node:22-alpine base ships a bundled npm whose vendored
+ * `node_modules` carry HIGH/CRITICAL CVEs (tar gzip-bomb, pacote, sigstore, …)
+ * under `/usr/local/lib/node_modules/npm/node_modules/...`. These are JS library
+ * packages, not apk packages, so the whole-base `apk upgrade --no-cache` above
+ * CANNOT patch them and the enforce-on-main built-image Trivy scan reds.
+ *
+ * The shipped runtime only runs `node server.js` — npm/npx/corepack are UNUSED at
+ * runtime (node ≠ npm). The fix ELIMINATES the surface rather than suppressing it:
+ * both the shipped Dockerfile.node and its lockstep trivyscan fixture rm the
+ * bundled npm + corepack after the apk upgrade. This guard mutation-fails if a
+ * future edit drops the removal from either file.
+ *
+ * Scoped to the node pair on purpose: the docs (oven/bun) arm ships no npm, so its
+ * built-image scan is green and needs no strip.
+ */
+describe('#703 — the node image strips the base-bundled npm/corepack CVE surface', () => {
+  const NODE_PAIR = [
+    'examples/bun-exec/Dockerfile.node',
+    'examples/bun-exec/Dockerfile.node.trivyscan',
+  ];
+
+  for (const rel of NODE_PAIR) {
+    it(`${rel} removes the bundled npm and corepack after the apk upgrade`, () => {
+      const body = readJoinedDockerfile(rel);
+      // A single rm step that clears BOTH the npm and the corepack trees — the
+      // whole vulnerable closure lives under node_modules/npm, corepack is the
+      // sibling package manager, neither is used by `node server.js`.
+      const rm = [...body.matchAll(/^RUN\s+rm\s+-rf\s+.+$/gim)].map((m) => m[0]);
+      const strip = rm.find(
+        (line) => /node_modules\/npm(\b|\/)/.test(line) && /corepack/.test(line),
+      );
+      expect(strip, `${rel} must rm the bundled npm + corepack`).toBeDefined();
+
+      // It must run AFTER the whole-base apk upgrade (the ordering the shipped
+      // Dockerfile documents), so the strip is not accidentally undone.
+      const upgradeAt = body.search(/apk\s+upgrade\s+--no-cache/);
+      const stripAt = body.indexOf(strip as string);
+      expect(upgradeAt).toBeGreaterThanOrEqual(0);
+      expect(stripAt).toBeGreaterThan(upgradeAt);
+    });
+  }
+});

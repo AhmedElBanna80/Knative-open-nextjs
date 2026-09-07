@@ -26,6 +26,15 @@ FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a55
 # .github/workflows/supply-chain.yml.
 RUN apk upgrade --no-cache
 
+# Strip the base image's bundled npm + corepack. node:22-alpine ships an npm whose
+# vendored `node_modules` (tar, pacote, sigstore, ...) carry HIGH/CRITICAL CVEs the
+# `apk upgrade` above CANNOT patch — they are JS library packages, not apk packages.
+# The shipped runtime only runs `node server.js` (node ≠ npm), so no package manager
+# is needed; removing them ELIMINATES that CVE surface rather than suppressing it.
+# Kept in lockstep with Dockerfile.node.trivyscan by tests/built-image-trivy.test.ts.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 WORKDIR /app
 
 # COPY THE STANDALONE TREE WHOLE, and move WORKDIR to the app inside it, rather
