@@ -109,6 +109,42 @@ describe('waitForListeningPort (#678)', () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 30_000);
 
+  it('carries the child stderr on EVERY early exit, even under concurrency', async () => {
+    // The #968-class flake: the rejection was built on the child's `exit` event,
+    // which Node fires before the stderr pipe is guaranteed drained — so the final
+    // chunk carrying the crash reason could still be in flight and the message came
+    // back WITHOUT it. The fix anchors on `close` (all stdio flushed). One serial
+    // pass never exposed the drain race; loading the event loop with many children
+    // exiting at once is what surfaced it on CI, so this drives that shape and
+    // asserts the reason is present in ALL of them, not just usually.
+    const kids = Array.from({ length: 24 }, () =>
+      spawnNode(`throw new Error('BOOT-FAILED-ON-PURPOSE')`),
+    );
+    try {
+      const messages = await Promise.all(
+        kids.map((k) =>
+          waitForListeningPort(k, { timeoutMs: 20_000, label: 'racer' }).then(
+            () => 'RESOLVED — a crashing child must not resolve',
+            (err: Error) => err.message,
+          ),
+        ),
+      );
+      for (const msg of messages) {
+        expect(msg).toMatch(/racer exited early[\s\S]*BOOT-FAILED-ON-PURPOSE/);
+      }
+    } finally {
+      for (const k of kids) {
+        if (k.exitCode === null) {
+          try {
+            k.kill('SIGKILL');
+          } catch {
+            /* already gone */
+          }
+        }
+      }
+    }
+  }, 40_000);
+
   it('REJECTS on timeout when the child comes up but never announces a port', async () => {
     // The other silent-failure shape: alive, but no readiness line. Without an
     // explicit timeout this is the hang the discovery change could have created.
