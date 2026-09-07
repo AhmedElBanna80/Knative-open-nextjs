@@ -53,6 +53,19 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 
 /**
+ * The `.integrity.json` schema version this shim understands (#929).
+ *
+ * The writer (`native-integrity.ts`) emits this same number from an EXPORTED
+ * constant of the same name; this shim is self-contained (its text is injected
+ * into sharp's module slot, so it cannot import), so it carries its own literal.
+ * A test (`native-integrity.test.ts`) ties the two so bumping one without the
+ * other reds. A manifest whose `version` is anything else is refused below,
+ * fail-closed — a schema the reader predates, or a corrupted/rogue manifest,
+ * must not be trusted as if valid.
+ */
+const NATIVE_INTEGRITY_SCHEMA_VERSION = 1;
+
+/**
  * Absolute path to the addon. `KNEXT_SHARP_ADDON` wins so an image can put the
  * native tree wherever it likes; the default is beside the executable, which is
  * where a single-binary deployment naturally keeps it.
@@ -291,6 +304,23 @@ function verifyAgainstManifest(addon) {
         `  underlying error: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  // #929: the manifest declares a schema `version`, and it is asserted BEFORE
+  // any of its contents are trusted. A version the reader does not understand is
+  // a manifest of an unknown shape — a future format bump this shim predates, or
+  // a corrupted/rogue file — and reading its `files`/`packages` as if the layout
+  // were the current one is exactly the silent-mismatch the field exists to
+  // prevent. Fail closed, matching how a tampered or unlisted payload is handled.
+  if (manifest?.version !== NATIVE_INTEGRITY_SCHEMA_VERSION) {
+    throw new Error(
+      `knext: refusing to dlopen — the native integrity manifest declares an unsupported schema version\n` +
+        `  manifest: ${manifestPath}\n` +
+        `  found version: ${JSON.stringify(manifest?.version)}\n` +
+        `  this shim understands version ${NATIVE_INTEGRITY_SCHEMA_VERSION}\n` +
+        '  the manifest was written by an incompatible `kn-next build`, or was altered. Rebuild the\n' +
+        '  image with a matching knext; do not edit the manifest to satisfy this check.',
+    );
+  }
+
   const root = dirname(manifestPath);
   const files = manifest && manifest.files ? manifest.files : {};
 

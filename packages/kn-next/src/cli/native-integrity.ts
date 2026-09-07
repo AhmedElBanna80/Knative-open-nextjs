@@ -47,6 +47,19 @@ import { UsageError } from "./shared";
 /** Lives inside the tree, so shipping the tree ships the manifest. */
 export const INTEGRITY_MANIFEST_NAME = ".integrity.json";
 
+/**
+ * The schema version of `.integrity.json`. Written here and asserted by the
+ * dlopen shim (`sharp-addon-dlopen.mjs`) before it trusts a manifest, so a
+ * schema-incompatible manifest — a future format bump the reader predates, or a
+ * corrupted/rogue one — is refused rather than read as if valid (#929).
+ *
+ * The shim is self-contained (its text is injected into sharp's module slot),
+ * so it cannot import this constant; it carries its own literal, and a test
+ * (`native-integrity.test.ts`) ties the two so bumping one without the other
+ * reds. Any format change must bump BOTH sides together.
+ */
+export const NATIVE_INTEGRITY_SCHEMA_VERSION = 1;
+
 export interface StagedImgPackage {
     /** The scoped name from the package's own `package.json`. */
     name: string;
@@ -56,7 +69,7 @@ export interface StagedImgPackage {
 }
 
 interface IntegrityManifest {
-    version: 1;
+    version: typeof NATIVE_INTEGRITY_SCHEMA_VERSION;
     algorithm: "sha256";
     packages: Record<
         string,
@@ -162,7 +175,7 @@ export function writeNativeIntegrityManifest(
     }
 
     const manifest: IntegrityManifest = {
-        version: 1,
+        version: NATIVE_INTEGRITY_SCHEMA_VERSION,
         algorithm: "sha256",
         packages: sortKeys(packages),
         files: sortKeys(files),
