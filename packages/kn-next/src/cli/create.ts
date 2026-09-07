@@ -89,28 +89,13 @@ export function templateRoot(): string {
 }
 
 /**
- * Lockfiles/workspace manifests Next.js uses to infer `outputFileTracingRoot`.
- * The standalone output nests under the app's path RELATIVE to that root, which
- * is why the emitted seam guard, `start` script and Dockerfile all need it: a
- * guard aimed at the wrong directory finds no build and SKIPS — green-by-skip,
- * which is not a pass (#408).
- */
-/**
- * The lockfile list and the walk itself live in `tracing-root.ts` (#644): the
- * same rule decides `deploy`/`preview`'s docker build context, and two copies
- * of it agreed only for `apps/<name>`.
+ * The tracing root decides the docker build context and which lockfile's
+ * install command the scaffold bakes. The lockfile list and the walk itself
+ * live in `tracing-root.ts` (#644): the same rule decides `deploy`/`preview`'s
+ * docker build context, and two copies of it agreed only for `apps/<name>`.
  */
 
 export interface Layout {
-    /**
-     * `.next/standalone/<prefix>server.js` — the app's path relative to the
-     * tracing root, slash-terminated, or "" when the app IS that root.
-     * ALSO the app's path inside the docker build context, because the
-     * generated Dockerfile's context IS the tracing root (see `Dockerfile.hbs`).
-     * Those two meanings coincide only under that choice of context — which is
-     * why the context is stated in the emitted file rather than assumed.
-     */
-    standalonePrefix: string;
     /** Absolute path of the inferred tracing root (= the docker build context). */
     root: string;
     /** Install command matching the lockfile actually found at `root`. */
@@ -138,19 +123,7 @@ export function resolveLayout(
     const app = resolve(appDir);
     const { root: found, installCmd } = resolveTracingRoot(app, warn);
     const root = found ?? app;
-    const rel = relative(root, app);
-    const standalonePrefix =
-        !rel || rel.startsWith("..") ? "" : `${rel.split(sep).join("/")}/`;
-    return { standalonePrefix, root, installCmd };
-}
-
-/**
- * The `.next/standalone/<prefix>server.js` path prefix for an app at `appDir`.
- * Empty string when the app directory IS the tracing root (a flat, single-app
- * repo); otherwise the app's slash-terminated path relative to that root.
- */
-export function standalonePrefixFor(appDir: string): string {
-    return resolveLayout(appDir).standalonePrefix;
+    return { root, installCmd };
 }
 
 /**
@@ -224,7 +197,6 @@ export function loadTemplates(root = templateRoot()): Map<string, string> {
 
 export interface RenderOptions {
     name: string;
-    standalonePrefix: string;
     version: string;
     /** Install command matching the lockfile at the tracing root. */
     installCmd?: string;
@@ -244,7 +216,6 @@ export function renderScaffold(opts: RenderOptions): Map<string, string> {
     assertValidAppName(opts.name);
     const vars: Record<string, string> = {
         name: opts.name,
-        standalonePrefix: opts.standalonePrefix,
         version: opts.version,
         installCmd: opts.installCmd ?? NO_LOCKFILE_INSTALL,
     };
@@ -290,7 +261,6 @@ export function writeScaffold(opts: ScaffoldOptions): Map<string, string> {
     const layout = resolveLayout(appDir);
     const files = renderScaffold({
         name,
-        standalonePrefix: layout.standalonePrefix,
         installCmd: layout.installCmd,
         version: opts.version ?? cliVersion(),
         templates: opts.templates,

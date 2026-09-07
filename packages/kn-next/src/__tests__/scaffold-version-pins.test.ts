@@ -67,7 +67,6 @@ const manifestVersion = (): string =>
 const render = () =>
     renderScaffold({
         name: "pins-app",
-        standalonePrefix: "",
         version: cliVersion(),
     });
 

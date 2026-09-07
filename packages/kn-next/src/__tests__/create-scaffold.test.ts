@@ -40,7 +40,6 @@ import {
     createMain,
     loadTemplates,
     renderScaffold,
-    standalonePrefixFor,
     writeScaffold,
 } from "../cli/create";
 import { CONFIG_FILES } from "../cli/tracing-root";
@@ -658,7 +657,6 @@ describe("kn-next create — the renderer leaves no unsubstituted placeholder", 
         expect(() =>
             renderScaffold({
                 name: "x",
-                standalonePrefix: "",
                 version: "0.0.0",
                 templates: new Map([["a.ts", "const a = '{{ }}';\n"]]),
             }),
@@ -676,7 +674,6 @@ describe("kn-next create — the renderer leaves no unsubstituted placeholder", 
         expect(() =>
             renderScaffold({
                 name: "x",
-                standalonePrefix: "",
                 version: "0.0.0",
                 templates: new Map([["a.ts", "const a = '{{ nope }}';\n"]]),
             }),

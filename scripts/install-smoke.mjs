@@ -370,8 +370,8 @@ try {
   // built. A real user's app has no such ancestor, and neither does this one now.
   //
   // The root carries a package.json and a lockfile and nothing else. That is deliberate:
-  // it gives `create` a tracing root to compute a NON-EMPTY `standalonePrefix` against, so
-  // the nested-output path stays under test, while leaking no dependency resolution.
+  // it gives `create` a real tracing root to derive the install command from (#931 removed
+  // the standalone prefix that root used to feed), while leaking no dependency resolution.
   scaffoldRoot = mkdtempSync(join(tmpdir(), 'knext-scaffold-'));
   writeFileSync(
     join(scaffoldRoot, 'package.json'),
@@ -490,36 +490,12 @@ try {
   // `output` key at all, and its absence is itself guard-tested. The claim survives with a
   // different subject, asserted below against `.output/server/index.mjs` and `.output/public`.
   //
-  // WHERE that server lands is not a constant, and the first cut of this check assumed it
-  // was. Next nests the standalone output under the app's path relative to the tracing
-  // root it infers, so an app scaffolded inside another project emits
-  // `.next/standalone/<subdir>/server.js`. `create` already knows this — it resolves a
-  // `standalonePrefix` and bakes it into the generated Dockerfile's `WORKDIR /repo/<prefix>`.
-  // So the assertion reads the prefix back out of the artifact the user actually builds with.
-  //
-  // What that is worth, stated accurately, and NARROWLY — this comment has now been wrong
-  // twice, so the scope is spelled out rather than implied. The fixture below roots the
-  // scaffold with a lockfile and NO `pnpm-workspace.yaml` anywhere above it, so what this
-  // check proves is the pairing FOR AN APP WITH NO `pnpm-workspace.yaml` IN ITS ANCESTRY.
-  // That predicate is the one that is actually true, and it is narrower than it looks:
-  // `findWorkRoot` searches all the way up for `pnpm-workspace.yaml` BEFORE it considers a
-  // lockfile at any level, so an app with its own `package-lock.json` root still diverges
-  // if a workspace file sits anywhere above it. "Lockfile-rooted" — the predicate this
-  // comment used in its previous draft — was a false dichotomy, measured and disproven.
-  // Where they DISAGREE: Next's
-  // `dist/lib/find-root.js` looks up `pnpm-workspace.yaml` BEFORE any lockfile — its own
-  // comment says so — while `tracing-root.ts` excludes it, so `create` bakes an empty
-  // prefix and every path it emits misses the nested output. That is a real shipping bug,
-  // filed as #857, and this gate reds on it the moment the walk is fixed.
-  //
-  // The first version of this comment claimed a
-  // `create` computing the wrong prefix "fails here, and nothing else covers that", and
-  // review showed BOTH halves were false: `path.join` silently repaired a prefix missing
-  // its trailing slash, and `create-scaffold.test.ts` already covers the prefix itself at
-  // PR time. The honest claim is narrower and still worth having: an INCONSISTENCY between
-  // the prefix `create` bakes into the Dockerfile and where `next build` actually puts the
-  // server fails here, for the layout the fixture builds, and that pairing is not checked
-  // anywhere else.
+  // Three paragraphs about `standalonePrefix` — where the standalone server lands
+  // relative to the tracing root, the pnpm-workspace divergence (#857), and the
+  // prefix↔build-output pairing this gate proved — stood here until #931 removed the
+  // prefix surface itself: `create` no longer computes or bakes any path prefix, and the
+  // vinext Dockerfile names only literal `/app/...` paths. The tracing root still matters
+  // (it picks the install command, asserted above), but there is no prefix left to pair.
   const scaffoldDockerfile = readFileSync(join(scaffoldDir, 'Dockerfile'), 'utf8');
 
   // ── the Dockerfile must name paths THIS build actually produces ───────────
