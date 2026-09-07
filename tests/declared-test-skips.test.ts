@@ -66,14 +66,17 @@ const DECLARED: Record<string, { skips: Record<string, number>; reason: string }
   'apps/file-manager/sigterm-drain-e2e.test.ts': {
     skips: { 'it.skipIf': 4 },
     reason:
-      'Container e2e — needs docker and a built image. Gated so a laptop run does not fail on ' +
-      'a missing daemon; the alpine e2e lane runs it for real.',
+      'Boots the shipped runtime entry against a real `.next/standalone` mirror, probed inside ' +
+      'findStandaloneMirrorRoot(). LANE-BACKED (#932): the sigterm-drain-shipped job builds that ' +
+      'standalone tree and sets KNEXT_REQUIRE_STANDALONE=1, so a missing build FAILS the lane ' +
+      'rather than vanishing; off the flag (a local checkout) the cases skip.',
   },
   'apps/file-manager/sigterm-hardcap-e2e.test.ts': {
     skips: { 'it.skipIf': 1 },
     reason:
-      'Same docker gate as the drain e2e beside it: needs a container runtime and a built ' +
-      'image, so it is gated rather than failing on a machine without a daemon.',
+      'Same standalone gate as the drain e2e beside it: findStandaloneMirrorRoot() probes for the ' +
+      'built `.next/standalone` mirror. LANE-BACKED (#932) by the sigterm-drain-shipped job, which ' +
+      'runs both files with KNEXT_REQUIRE_STANDALONE=1 so a missing build fails rather than skips.',
   },
   'examples/bun-exec/test/request-byte-cap.test.ts': {
     skips: { 'describe.skipIf': 1 },
@@ -141,6 +144,17 @@ const DECLARED: Record<string, { skips: Record<string, number>; reason: string }
 const LANE_BACKED: Record<string, { flag: string }> = {
   'packages/kn-next/src/__tests__/artifact-contract-reality.test.ts': {
     flag: 'KNEXT_REQUIRE_OUTPUT',
+  },
+  // Both gate on a `.next/standalone` mirror probed inside findStandaloneMirrorRoot()
+  // — the helper-wrapped idiom the detector now traces one hop into. The
+  // sigterm-drain-shipped job builds that standalone tree and sets
+  // KNEXT_REQUIRE_STANDALONE=1, so a missing build FAILS the lane rather than
+  // vanishing; off the flag (a local checkout) the cases skip.
+  'apps/file-manager/sigterm-drain-e2e.test.ts': {
+    flag: 'KNEXT_REQUIRE_STANDALONE',
+  },
+  'apps/file-manager/sigterm-hardcap-e2e.test.ts': {
+    flag: 'KNEXT_REQUIRE_STANDALONE',
   },
 };
 
@@ -337,6 +351,52 @@ describe('#932 every artifact-gated skip has a lane, or is explicitly grandfathe
       expect(reason.length, `${f}: grandfather reason is too thin`).toBeGreaterThan(60);
       expect(reason, `${f} is grandfathered but cites no tracking issue`).toMatch(/#\d+/);
     }
+  });
+});
+
+describe('#932 the artifact-gated detector traces one function hop', () => {
+  it('catches a skip whose predicate resolves to a helper whose BODY probes the filesystem', () => {
+    // The repo idiom the inline+variable tracer was blind to: the existsSync is
+    // inside a CALLED function, not on the RHS of the traced variable. Both
+    // sigterm e2e specs are written exactly this way.
+    const src = [
+      'import { existsSync } from "node:fs";',
+      'function findBuild(): string | null {',
+      '  const dir = resolve(APP_DIR, ".next/standalone");',
+      '  if (!existsSync(dir)) return null;',
+      '  return dir;',
+      '}',
+      'const root = findBuild();',
+      'const skipReason = root !== null ? null : "no standalone build";',
+      'it.skipIf(skipReason !== null)("x", () => {});',
+    ].join('\n');
+    expect(artifactGatedSkipCount(src)).toBe(1);
+  });
+
+  it('the two sigterm e2e specs are now DETECTED as artifact-gated (they were scored 0)', () => {
+    // The exact files the helper-wrapped blind spot let through. Both are
+    // lane-backed via KNEXT_REQUIRE_STANDALONE, so LANE_BACKED keeps the #932
+    // guard green for them — this asserts only that the detector now SEES them.
+    for (const f of [
+      'apps/file-manager/sigterm-drain-e2e.test.ts',
+      'apps/file-manager/sigterm-hardcap-e2e.test.ts',
+    ]) {
+      expect(
+        artifactGatedSkipCount(read(f)),
+        `${f} is still invisible to the detector`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('does NOT count a helper that gates on the environment rather than a build artifact', () => {
+    // One hop must not over-count: an env/availability helper is a different
+    // class with its own lanes, and a build lane must not be demanded for it.
+    const src = [
+      'function bunAvailable(): boolean { return process.env.BUN === "1"; }',
+      'const bun = bunAvailable();',
+      'it.skipIf(!bun)("x", () => {});',
+    ].join('\n');
+    expect(artifactGatedSkipCount(src)).toBe(0);
   });
 });
 

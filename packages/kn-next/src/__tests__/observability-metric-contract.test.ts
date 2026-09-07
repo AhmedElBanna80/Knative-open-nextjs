@@ -497,7 +497,7 @@ describe("extractor guards (fail-first)", () => {
  * is not: it missed `apps/file-manager/README.md` (`knext_coldstart_*`), a
  * nested app doc a directory allowlist never reaches. A directory allowlist is
  * the same enumeration failure as a file list, one level up — so there is no
- * allowlist. Measured when widening: 291 tracked docs, 60 tokens (up from 22),
+ * allowlist. Measured when widening: 295 tracked docs, 60 tokens (up from 22),
  * all resolve.
  */
 const DOC_FILES = execFileSync("git", ["ls-files"], {
