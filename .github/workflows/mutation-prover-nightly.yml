@@ -112,6 +112,23 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # `mutation-prove-cli-node-runtime` (#899) grades
+      # `packages/kn-next/src/__tests__/cli-node-runtime.test.ts`, whose baseline
+      # HARD-THROWS when `packages/kn-next/dist/cli/kn-next.js` is absent — and
+      # `dist/` is gitignored, so on a clean checkout that prover ABORTS before
+      # its first mutation (`{"declared":4,"run":0}`, exit 1), which the runner
+      # correctly treats as a fatal declared-vs-run mismatch and reds the lane.
+      # Build the publishable closure in dependency order — the SAME command and
+      # order every ci.yml job uses (lib -> db -> core) — so the bundle exists
+      # before the provers run. Carries no soft-fail flag: a build failure here
+      # MUST fail the lane, not be masked. Cheap relative to the prover fleet (a
+      # tsup bundle of three packages vs a vitest run per mutation).
+      - name: Build the publishable closure (produces dist/cli/kn-next.js)
+        run: |
+          bun run --filter @getknext/lib build
+          bun run --filter @getknext/db build
+          bun run --filter @getknext/core build
+
       - name: Run every mutation prover (FAIL on exit code OR count mismatch)
         run: node scripts/run-mutation-provers.mjs
 
