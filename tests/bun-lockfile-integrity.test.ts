@@ -140,6 +140,68 @@ describe('bun.lock integrity (#879)', () => {
     ).toBe(true);
   });
 
+  // The three OpenTelemetry HIGH advisories that surfaced during the #888
+  // lockfile scan but were out of that task's scope (dev-toolchain browserslist).
+  // All three arrive transitively through `@opentelemetry/sdk-node` — a direct
+  // dep of apps/file-manager pulled in by @vercel/otel — which pins both leaves
+  // exactly, so a coherent sdk-node bump is what moves the set. The advisory DB
+  // also names sdk-node itself as affected/fixed, so bumping only the leaves
+  // would leave the sdk-node row red — sdk-node carries its own floor here.
+  //
+  //   @opentelemetry/exporter-prometheus < 0.217.0  CVE-2026-44902 (HIGH)
+  //   @opentelemetry/sdk-node            < 0.217.0  CVE-2026-44902 (HIGH)
+  //   @opentelemetry/propagator-jaeger   < 2.9.0    CVE-2026-59892 (HIGH)
+  //
+  // Fixed at source (top-level overrides + relock), not suppressed — the same
+  // bump-don't-suppress discipline as the browserslist guards above.
+  const otelFloors: ReadonlyArray<{ pkg: string; floor: readonly [number, number, number] }> = [
+    { pkg: '@opentelemetry/exporter-prometheus', floor: [0, 217, 0] },
+    { pkg: '@opentelemetry/sdk-node', floor: [0, 217, 0] },
+    { pkg: '@opentelemetry/propagator-jaeger', floor: [2, 9, 0] },
+  ];
+
+  const below = (t: readonly [number, number, number], floor: readonly [number, number, number]) =>
+    t[0] < floor[0] ||
+    (t[0] === floor[0] && (t[1] < floor[1] || (t[1] === floor[1] && t[2] < floor[2])));
+
+  for (const { pkg, floor } of otelFloors) {
+    it(`resolves no ${pkg} below ${floor.join('.')} — the CVE-2026-44902/59892 fix line (#s7-a2)`, () => {
+      const escaped = pkg.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const versions = [
+        ...lockText().matchAll(new RegExp(`${escaped}@(\\d+)\\.(\\d+)\\.(\\d+)`, 'g')),
+      ];
+      expect(
+        versions.length,
+        `no ${pkg} resolution found in bun.lock — the guard has no subject`,
+      ).toBeGreaterThan(0);
+      const bad = versions
+        .map((m) => ({ raw: m[0], t: [Number(m[1]), Number(m[2]), Number(m[3])] as const }))
+        .filter(({ t }) => below(t, floor));
+      expect(
+        bad.map((b) => b.raw),
+        `bun.lock still resolves ${pkg} below ${floor.join('.')}, which carries a HIGH ` +
+          '(CVE-2026-44902 / CVE-2026-59892). Raise the top-level override floor and relock; ' +
+          'do not suppress the finding.',
+      ).toEqual([]);
+    });
+
+    it(`declares the ${pkg} override floor at or above ${floor.join('.')} (#s7-a2)`, () => {
+      const declared = manifest().overrides?.[pkg];
+      expect(
+        declared,
+        `package.json declares no \`${pkg}\` override — the floor is what keeps the ` +
+          'vulnerable sdk-node-pulled line from resolving',
+      ).toBeDefined();
+      const min = String(declared).match(/>=\s*(\d+)\.(\d+)\.(\d+)/);
+      expect(min, `the ${pkg} override does not express a \`>=x.y.z\` floor`).not.toBeNull();
+      const t = [Number(min?.[1]), Number(min?.[2]), Number(min?.[3])] as const;
+      expect(
+        below(t, floor),
+        `the ${pkg} override floor is below ${floor.join('.')}, the CVE fix line`,
+      ).toBe(false);
+    });
+  }
+
   it('packageManager names the bun the lockfile was written by', () => {
     // Not enforcement — measured: bun ignores this field. It is the only place
     // recording WHICH version to install with, so the error messages above can
