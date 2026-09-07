@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { CONDITIONAL_FORMS, SKIP_FORMS, scanSkips } from '../scripts/lib/test-skips.mjs';
+import {
+  artifactGatedSkipCount,
+  CONDITIONAL_FORMS,
+  SKIP_FORMS,
+  scanSkips,
+} from '../scripts/lib/test-skips.mjs';
 
 /**
  * Every skipped test in the repo is DECLARED, with a reason (#927).
@@ -12,8 +17,8 @@ import { CONDITIONAL_FORMS, SKIP_FORMS, scanSkips } from '../scripts/lib/test-sk
  * not: the ad-hoc scan behind it globbed the tests directory and the per-package
  * __tests__ directories but neither apps nor examples, and its pattern list
  * omitted `.skipIf` —
- * the form nearly every real skip here uses. It found one file. There are
- * ELEVEN.
+ * the form nearly every real skip here uses. It found one file. There were
+ * ELEVEN; #932 retired one (node-compile-cache), leaving the ten declared below.
  *
  * The lesson is the one this repo keeps relearning: a sweep whose correctness
  * depends on remembering a directory and a spelling is not a sweep, and its
@@ -22,18 +27,21 @@ import { CONDITIONAL_FORMS, SKIP_FORMS, scanSkips } from '../scripts/lib/test-sk
  * here where changing it requires saying why.
  *
  * WHY A SKIP IS WORTH THIS MUCH CEREMONY. A `skipIf` whose predicate is false in
- * CI reports exactly the same green as a passing test. Two sites below vanish
- * when a build artifact is missing — `artifact-contract-reality` and
- * `compile-cache-health-bun` — so on any machine that did not build the artifact
- * they assert nothing and say nothing. That is the "control that reports success
- * while inert" class sprint 1 named as this project's most common defect, and it
- * is sitting inside the test suite itself.
+ * CI reports exactly the same green as a passing test. An artifact-gated skip —
+ * one whose predicate vanishes when a BUILD ARTIFACT is absent — therefore
+ * asserts nothing and says nothing wherever the artifact was not built. That is
+ * the "control that reports success while inert" class sprint 1 named as this
+ * project's most common defect, sitting inside the test suite itself.
  *
- * WHAT THIS GUARD DOES **NOT** CLAIM. It does not claim the skips below are all
- * fine — `artifact-contract-reality` and the compile-cache trio are flagged in
- * their own entries as genuinely weak, and #932 tracks them. It claims only that
- * the set is known, counted, and cannot grow silently. That is a smaller claim
- * than "no self-skipping guard survives", and it is the one that is true.
+ * WHAT THIS GUARD ADDS BEYOND COUNTING (#932). Counting keeps the set from
+ * growing silently, but it does not stop a NEW artifact-gated skip from being
+ * declared with a plausible reason and no lane. So a second describe block below
+ * detects artifact-gated skips mechanically (`artifactGatedSkipCount`) and
+ * requires each to be either LANE-BACKED — a CI job that BUILDS the artifact and
+ * sets a `KNEXT_REQUIRE_*` flag, verified against `ci.yml` — or in a FROZEN,
+ * explicitly-reasoned grandfather set. The three sites #932 named are resolved
+ * (two retired, one made fail-closed and lane-backed); the one weak site this
+ * mechanism surfaced is grandfathered in the open rather than left hidden.
  */
 
 const REPO_ROOT = resolve(import.meta.dirname, '..');
@@ -49,26 +57,26 @@ const DECLARED: Record<string, { skips: Record<string, number>; reason: string }
   'apps/file-manager/bun-portability.test.ts': {
     skips: { 'it.skipIf': 2 },
     reason:
-      'Boots the standalone server under a real bun binary; skipped where bun is absent from ' +
-      'PATH. CI installs bun for this lane, so the predicate is true where it counts.',
-  },
-  'apps/file-manager/node-compile-cache.test.ts': {
-    skips: { 'it.skipIf': 1 },
-    reason:
-      'Requires a built .next tree. WEAK: silently vanishes on a machine that has not built, ' +
-      'so a green run here is not evidence the assertion ran. Tracked by #932.',
+      'Boots a bun binary against apps/file-manager/.next/standalone/…/server.js. ARTIFACT-GATED ' +
+      'and WEAK: file-manager builds vinext → .output since ADR-0048 and no longer emits that ' +
+      'standalone tree, so in CI the skip is always taken and asserts nothing. Surfaced by the ' +
+      '#932 artifact-gated guard and grandfathered there (GRANDFATHERED_WEAK) rather than hidden; ' +
+      'repointing or retiring it is out of #932 scope. Tracked by #932.',
   },
   'apps/file-manager/sigterm-drain-e2e.test.ts': {
     skips: { 'it.skipIf': 4 },
     reason:
-      'Container e2e — needs docker and a built image. Gated so a laptop run does not fail on ' +
-      'a missing daemon; the alpine e2e lane runs it for real.',
+      'Boots the shipped runtime entry against a real `.next/standalone` mirror, probed inside ' +
+      'findStandaloneMirrorRoot(). LANE-BACKED (#932): the sigterm-drain-shipped job builds that ' +
+      'standalone tree and sets KNEXT_REQUIRE_STANDALONE=1, so a missing build FAILS the lane ' +
+      'rather than vanishing; off the flag (a local checkout) the cases skip.',
   },
   'apps/file-manager/sigterm-hardcap-e2e.test.ts': {
     skips: { 'it.skipIf': 1 },
     reason:
-      'Same docker gate as the drain e2e beside it: needs a container runtime and a built ' +
-      'image, so it is gated rather than failing on a machine without a daemon.',
+      'Same standalone gate as the drain e2e beside it: findStandaloneMirrorRoot() probes for the ' +
+      'built `.next/standalone` mirror. LANE-BACKED (#932) by the sigterm-drain-shipped job, which ' +
+      'runs both files with KNEXT_REQUIRE_STANDALONE=1 so a missing build fails rather than skips.',
   },
   'examples/bun-exec/test/request-byte-cap.test.ts': {
     skips: { 'describe.skipIf': 1 },
@@ -99,9 +107,11 @@ const DECLARED: Record<string, { skips: Record<string, number>; reason: string }
   'packages/kn-next/src/__tests__/artifact-contract-reality.test.ts': {
     skips: { 'it.skipIf': 1 },
     reason:
-      'Asserts the contract against a REAL .output tree. WEAK: `it.skipIf(!existsSync(...))` ' +
-      'means the whole point of the file evaporates wherever the sample was not built, and ' +
-      'nothing reports that it did. Tracked by #932.',
+      'Asserts the contract against a REAL .output tree. LANE-BACKED (#932): the skip is now ' +
+      'fail-closed under KNEXT_REQUIRE_OUTPUT=1, and the bun-exec-alpine-image lane both sets ' +
+      'that flag and builds .output (./build.sh) — so in CI a missing artifact FAILS, it does ' +
+      'not vanish. Off the flag (a clean local checkout) the case skips rather than run against ' +
+      'a tree that was never built. Wiring guarded by tests/artifact-contract-reality-ci.test.ts.',
   },
   'packages/kn-next/src/__tests__/cli-node-runtime.test.ts': {
     skips: { 'it.skipIf': 2 },
@@ -112,10 +122,73 @@ const DECLARED: Record<string, { skips: Record<string, number>; reason: string }
   'packages/kn-next/src/__tests__/compile-cache-health-bun.test.ts': {
     skips: { 'it.skipIf': 3 },
     reason:
-      'Requires a real bun and a warmed cache dir. WEAK for the same reason as the two above. ' +
-      'Tracked by #932.',
+      'Runs the compile-cache diagnostic under a REAL bun; the skips gate on bun AVAILABILITY ' +
+      '(and its version), not on a build artifact. LANE-BACKED: the compile-cache-bun-probe job ' +
+      'sets KNEXT_REQUIRE_BUN=1 (a missing bun then FAILS, never skips) and pins bun 1.4.0, and ' +
+      'the file itself asserts that floor so the >=1.4 hardcap-warn case cannot silently skip on ' +
+      'a pin downgrade. Wiring guarded by tests/compile-cache-health-bun-ci.test.ts.',
   },
 };
+
+/**
+ * ARTIFACT-GATED skips that ARE backed by a CI lane (#932).
+ *
+ * An artifact-gated `skipIf` — one whose predicate vanishes when a BUILD ARTIFACT
+ * is absent — reports the same green as a passing test wherever the artifact was
+ * not built. `artifactGatedSkipCount` finds them mechanically. Each one listed
+ * here names the REQUIRE flag that turns it fail-closed; the guard below then
+ * proves, against `ci.yml`, that some job BOTH sets that flag to `1` AND runs the
+ * spec — so the flag cannot exist while CI never sets it (#408), and a NEW
+ * artifact-gated skip added without such a lane reds here.
+ */
+const LANE_BACKED: Record<string, { flag: string }> = {
+  'packages/kn-next/src/__tests__/artifact-contract-reality.test.ts': {
+    flag: 'KNEXT_REQUIRE_OUTPUT',
+  },
+  // Both gate on a `.next/standalone` mirror probed inside findStandaloneMirrorRoot()
+  // — the helper-wrapped idiom the detector now traces one hop into. The
+  // sigterm-drain-shipped job builds that standalone tree and sets
+  // KNEXT_REQUIRE_STANDALONE=1, so a missing build FAILS the lane rather than
+  // vanishing; off the flag (a local checkout) the cases skip.
+  'apps/file-manager/sigterm-drain-e2e.test.ts': {
+    flag: 'KNEXT_REQUIRE_STANDALONE',
+  },
+  'apps/file-manager/sigterm-hardcap-e2e.test.ts': {
+    flag: 'KNEXT_REQUIRE_STANDALONE',
+  },
+};
+
+/**
+ * Artifact-gated skips with NO lane, grandfathered EXPLICITLY rather than hidden.
+ *
+ * FROZEN on purpose: a new artifact-gated skip cannot join this set by accident —
+ * adding one is a visible, reviewable edit that has to state a reason, which is
+ * the whole point. Everything here is a genuinely weak skip (green-by-skip in CI)
+ * that this change surfaced but is out of scope to fix.
+ */
+const GRANDFATHERED_WEAK: Record<string, string> = Object.freeze({
+  'apps/file-manager/bun-portability.test.ts':
+    'Gates on existsSync of apps/file-manager/.next/standalone/…/server.js, which file-manager no ' +
+    'longer emits — it builds vinext → .output since ADR-0048 — so this skip is always taken in ' +
+    'CI and asserts nothing there. Same weak class as the three #932 fixed; surfaced by the ' +
+    'artifact-gated guard, out of that issue’s scope to repoint or retire. Tracked by #932.',
+});
+
+/**
+ * The block of `ci.yml` belonging to the job that runs `testPath`, bounded by the
+ * next top-level job key. Used to prove a flag and a test path are co-located in
+ * ONE job rather than merely both present somewhere in the workflow.
+ */
+function jobBlocksContaining(ciYml: string, testPath: string): string[] {
+  const jobStart = /\n {2}[a-z][a-z0-9-]*:\n/g;
+  const starts = [...ciYml.matchAll(jobStart)].map((m) => m.index ?? 0);
+  const blocks: string[] = [];
+  for (let i = 0; i < starts.length; i++) {
+    const block = ciYml.slice(starts[i], starts[i + 1] ?? ciYml.length);
+    if (block.includes(testPath)) blocks.push(block);
+  }
+  return blocks;
+}
 
 const specFiles = () =>
   execFileSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 })
@@ -191,15 +264,139 @@ describe('#927 every skipped test is declared', () => {
     }
   });
 
-  it('the WEAK skips are named as weak and tracked', () => {
-    // The honest part. Three sites vanish when a build artifact is absent and
-    // report the same green as a passing test. Declaring them is not endorsing
-    // them, and the distinction is asserted rather than left to the prose.
-    const weak = Object.entries(DECLARED).filter(([, e]) => /WEAK/.test(e.reason));
-    expect(weak.length).toBeGreaterThan(0);
-    for (const [f, e] of weak) {
-      expect(e.reason, `${f} is marked WEAK but cites no tracking issue`).toMatch(/#\d+/);
+  it('a WEAK marker survives only where the skip really is weak (grandfathered)', () => {
+    // #932 fixed the three it named (fail-closed under a flag, or retired), so
+    // none of those still say WEAK. The ONLY declarations allowed to keep the
+    // marker are the ones the artifact-gated guard grandfathered — a WEAK marker
+    // outliving its fix is the stale-allowlist failure this suite guards against.
+    const weakButNotGrandfathered = Object.entries(DECLARED)
+      .filter(([f, e]) => /WEAK/.test(e.reason) && !(f in GRANDFATHERED_WEAK))
+      .map(([f]) => f);
+    expect(
+      weakButNotGrandfathered,
+      'these declarations say WEAK but are not grandfathered — if the skip was fixed, drop the ' +
+        'marker; if it is genuinely weak, register it in GRANDFATHERED_WEAK',
+    ).toEqual([]);
+  });
+});
+
+describe('#932 every artifact-gated skip has a lane, or is explicitly grandfathered', () => {
+  const files = specFiles();
+
+  it('detects the artifact-gated skips it is meant to (non-vacuity)', () => {
+    // If the detector silently stopped matching, every assertion below would
+    // pass by finding nothing. The lane-backed subject is the floor.
+    expect(
+      artifactGatedSkipCount(
+        read('packages/kn-next/src/__tests__/artifact-contract-reality.test.ts'),
+      ),
+      'the artifact-gated detector no longer sees the lane-backed subject',
+    ).toBeGreaterThan(0);
+  });
+
+  it('every artifact-gated skip is lane-backed or explicitly grandfathered', () => {
+    // THE #932 GUARD. A new artifact-gated skipIf added without a registered
+    // lane is neither in LANE_BACKED nor in the frozen GRANDFATHERED_WEAK set,
+    // so it reds here — the strengthening over the undeclared/count-drift checks
+    // above, which a DECLARED entry alone would satisfy.
+    const unregistered: string[] = [];
+    for (const f of files) {
+      if (artifactGatedSkipCount(read(f)) === 0) continue;
+      if (LANE_BACKED[f] || GRANDFATHERED_WEAK[f]) continue;
+      unregistered.push(f);
     }
+    expect(
+      unregistered,
+      'these files have an artifact-gated skip (vanishes when a build artifact is absent) with no ' +
+        'registered lane. Wire a CI lane that BUILDS the artifact and sets a KNEXT_REQUIRE_* flag, ' +
+        'add it to LANE_BACKED — or, if it genuinely cannot run in CI, add it to ' +
+        `GRANDFATHERED_WEAK with a reason:\n  ${unregistered.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('every LANE_BACKED spec reads its flag AND a CI job sets it beside the test path', () => {
+    const ciYml = read('.github/workflows/ci.yml');
+    for (const [f, { flag }] of Object.entries(LANE_BACKED)) {
+      // The spec must be artifact-gated (else the registration is stale) and
+      // must actually READ the flag — a flag the test ignores is decoration.
+      expect(
+        artifactGatedSkipCount(read(f)),
+        `${f} is LANE_BACKED but is no longer artifact-gated — drop it`,
+      ).toBeGreaterThan(0);
+      expect(
+        read(f),
+        `${f} never reads ${flag} — the flag would not convert its skip to a failure`,
+      ).toContain(flag);
+
+      // BOTH halves in ONE ci.yml job: the flag set to 1, and the test path run.
+      const blocks = jobBlocksContaining(ciYml, f);
+      expect(blocks.length, `no ci.yml job runs ${f}`).toBeGreaterThan(0);
+      const flagRe = new RegExp(`${flag}:\\s*['"]?1['"]?`);
+      const wired = blocks.some((b) => flagRe.test(b));
+      expect(
+        wired,
+        `${f} runs in a ci.yml job that does NOT set ${flag}=1 — a missing artifact would skip, not ` +
+          'fail (the #408 defect: the flag exists, CI never sets it)',
+      ).toBe(true);
+    }
+  });
+
+  it('every GRANDFATHERED_WEAK entry is a real, still-artifact-gated file with a tracked reason', () => {
+    for (const [f, reason] of Object.entries(GRANDFATHERED_WEAK)) {
+      expect(files, `${f} is grandfathered but is not a tracked spec file`).toContain(f);
+      expect(
+        artifactGatedSkipCount(read(f)),
+        `${f} is grandfathered as artifact-gated but no longer is — drop it`,
+      ).toBeGreaterThan(0);
+      expect(reason.length, `${f}: grandfather reason is too thin`).toBeGreaterThan(60);
+      expect(reason, `${f} is grandfathered but cites no tracking issue`).toMatch(/#\d+/);
+    }
+  });
+});
+
+describe('#932 the artifact-gated detector traces one function hop', () => {
+  it('catches a skip whose predicate resolves to a helper whose BODY probes the filesystem', () => {
+    // The repo idiom the inline+variable tracer was blind to: the existsSync is
+    // inside a CALLED function, not on the RHS of the traced variable. Both
+    // sigterm e2e specs are written exactly this way.
+    const src = [
+      'import { existsSync } from "node:fs";',
+      'function findBuild(): string | null {',
+      '  const dir = resolve(APP_DIR, ".next/standalone");',
+      '  if (!existsSync(dir)) return null;',
+      '  return dir;',
+      '}',
+      'const root = findBuild();',
+      'const skipReason = root !== null ? null : "no standalone build";',
+      'it.skipIf(skipReason !== null)("x", () => {});',
+    ].join('\n');
+    expect(artifactGatedSkipCount(src)).toBe(1);
+  });
+
+  it('the two sigterm e2e specs are now DETECTED as artifact-gated (they were scored 0)', () => {
+    // The exact files the helper-wrapped blind spot let through. Both are
+    // lane-backed via KNEXT_REQUIRE_STANDALONE, so LANE_BACKED keeps the #932
+    // guard green for them — this asserts only that the detector now SEES them.
+    for (const f of [
+      'apps/file-manager/sigterm-drain-e2e.test.ts',
+      'apps/file-manager/sigterm-hardcap-e2e.test.ts',
+    ]) {
+      expect(
+        artifactGatedSkipCount(read(f)),
+        `${f} is still invisible to the detector`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('does NOT count a helper that gates on the environment rather than a build artifact', () => {
+    // One hop must not over-count: an env/availability helper is a different
+    // class with its own lanes, and a build lane must not be demanded for it.
+    const src = [
+      'function bunAvailable(): boolean { return process.env.BUN === "1"; }',
+      'const bun = bunAvailable();',
+      'it.skipIf(!bun)("x", () => {});',
+    ].join('\n');
+    expect(artifactGatedSkipCount(src)).toBe(0);
   });
 });
 

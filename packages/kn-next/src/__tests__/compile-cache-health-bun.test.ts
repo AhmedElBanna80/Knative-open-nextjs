@@ -153,6 +153,33 @@ describe("#309 the compile-cache diagnostic under REAL bun", () => {
         ).not.toBeNull();
     });
 
+    it("has bun >= 1.4 whenever KNEXT_REQUIRE_BUN=1 (a downgraded pin FAILS, not skips)", () => {
+        // #932: the `:204 WARNS under bun >=1.4` case is gated on
+        // `bunAtLeast14(bunVersionOf(bun))` — below 1.4 it SKIPS, which is
+        // correct locally but must never happen in the lane that exists to prove
+        // that half. The CI job pins `bun-version: '1.4.0'`; if that pin is
+        // downgraded the hardcap-warn case would vanish green-by-skip while the
+        // flag stayed set. This makes the floor an assertion rather than a
+        // silent predicate: under the flag, a sub-1.4 bun is a hard FAILURE.
+        if (!bunRequired) {
+            // Not the gate — the gate is the CI job that sets the flag AND pins
+            // bun 1.4.0 (asserted in tests/compile-cache-health-bun-ci.test.ts).
+            expect(bunRequired).toBe(false);
+            return;
+        }
+        expect(
+            bun,
+            "KNEXT_REQUIRE_BUN=1 but `bun` is not on PATH",
+        ).not.toBeNull();
+        const version = bunVersionOf(bun as string);
+        expect(
+            bunAtLeast14(version),
+            `KNEXT_REQUIRE_BUN=1 but bun ${version} is below 1.4 — the ':204 WARNS under bun >=1.4' ` +
+                "case SKIPS below 1.4, so a downgraded pin would silently drop that half of #807. " +
+                "Keep the CI pin at bun >= 1.4.",
+        ).toBe(true);
+    });
+
     it.skipIf(!bun)(
         "observes the Bun shape the fix is built on, and it is VERSION-DEPENDENT since 1.4",
         () => {
