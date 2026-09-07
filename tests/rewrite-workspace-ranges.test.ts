@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { rewriteManifest, rewriteWorkspaceRange } from '../scripts/rewrite-workspace-ranges.mjs';
 
+type Manifest = {
+  name: string;
+  version: string;
+  dependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+};
+
 /**
  * `scripts/rewrite-workspace-ranges.mjs` is the FIX for the release lane's
  * `workspace:` protocol leak. `changeset publish` falls back to `npm publish`
@@ -56,12 +64,16 @@ describe('rewriteManifest — every dep group, fail-closed on an unknown sibling
       dependencies: { '@getknext/lib': 'workspace:^', 'drizzle-orm': '^0.45.2' },
       peerDependencies: { 'drizzle-kit': '^0.31.0' },
     };
-    const { changed, manifest, rewrites } = rewriteManifest(pkg, versions);
+    const { changed, manifest, rewrites } = rewriteManifest(pkg, versions) as {
+      changed: boolean;
+      manifest: Manifest;
+      rewrites: Array<{ group: string; dep: string; from: string; to: string }>;
+    };
     expect(changed).toBe(true);
-    expect(manifest.dependencies['@getknext/lib']).toBe('^0.4.0');
+    expect(manifest.dependencies?.['@getknext/lib']).toBe('^0.4.0');
     // Both halves: the non-workspace deps are untouched.
-    expect(manifest.dependencies['drizzle-orm']).toBe('^0.45.2');
-    expect(manifest.peerDependencies['drizzle-kit']).toBe('^0.31.0');
+    expect(manifest.dependencies?.['drizzle-orm']).toBe('^0.45.2');
+    expect(manifest.peerDependencies?.['drizzle-kit']).toBe('^0.31.0');
     expect(rewrites).toContainEqual({
       group: 'dependencies',
       dep: '@getknext/lib',
