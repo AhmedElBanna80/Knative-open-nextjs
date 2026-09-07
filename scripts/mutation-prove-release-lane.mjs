@@ -146,11 +146,24 @@ const CLI_MAJOR = Number(CLI_DECL[1]);
 /** A DIFFERENT major, whichever way the tree currently points. */
 const WRONG_CLI_MAJOR = CLI_MAJOR === 2 ? 3 : 2;
 
-/** The version-pr job's pin line — `id: changesets` makes it uniquely addressable. */
+/**
+ * The version-pr job's pin line — `id: changesets` makes it uniquely
+ * addressable, since the publish job carries the SAME `changesets/action@` pin
+ * (two occurrences) but no `id:`.
+ *
+ * The `uses:` line does not have to sit DIRECTLY under `id:`: a
+ * `continue-on-error: true` line now sits between them (the best-effort PR-open,
+ * softened while the org's PR-creation toggle is off). Anchoring on
+ * `id: changesets\nuses:` FATALed the moment that line went in — the anchor-rot
+ * this lane exists to surface, hit by the lane's own prover. So the intervening
+ * job-level keys are matched non-greedily rather than assumed absent; `id:`
+ * still scopes the capture to the one job, and group 1 stays a unique anchor for
+ * mutation 20 because it contains `id: changesets`.
+ */
 const VERSION_PIN = derive(
   "the version-pr job's changesets/action pin",
   WORKFLOW_TEXT,
-  /( {8}id: changesets\n {8}uses: changesets\/action@[0-9a-f]{40} # v)(\d+)(\.\d+\.\d+)/,
+  /( {8}id: changesets\n(?: {8}[^\n]*\n)*? {8}uses: changesets\/action@[0-9a-f]{40} # v)(\d+)(\.\d+\.\d+)/,
 );
 const PIN_MAJOR = Number(VERSION_PIN[2]);
 const WRONG_PIN_MAJOR = PIN_MAJOR === 1 ? 2 : 1;
@@ -249,8 +262,8 @@ prove(
   'the version job is handed NODE_AUTH_TOKEN',
   WORKFLOW,
   LIVENESS_SPEC,
-  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n\n  # Decide whether',
-  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}\n\n  # Decide whether',
+  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n',
+  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}\n',
 );
 
 // 7. Same defect, graded by the OTHER guard. Round one proved this mutation
@@ -260,8 +273,8 @@ prove(
   'the version job is handed NODE_AUTH_TOKEN (graded by the pins guard)',
   WORKFLOW,
   PINS_SPEC,
-  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n\n  # Decide whether',
-  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}\n\n  # Decide whether',
+  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n',
+  '        env:\n          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}\n',
 );
 
 // 8. Defence in depth removed: the un-approved lane gains a publish command.
