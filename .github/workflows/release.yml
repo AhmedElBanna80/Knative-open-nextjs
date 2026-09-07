@@ -414,6 +414,28 @@ jobs:
       - name: Build publishable packages
         run: bun run --filter @getknext/lib build && bun run --filter @getknext/db build && bun run --filter @getknext/core build
 
+      # ── FIX: rewrite `workspace:` ranges to concrete ranges BEFORE publish ──
+      # `changeset publish` shells to `npm publish` for a bun workspace
+      # (getPublishTool: bun ∉ {npm,pnpm,yarn} → npm), and `npm publish` invoked
+      # in a package subdir of a BUN-installed workspace ships `workspace:^`
+      # VERBATIM — it does not rewrite it the way `bun pm pack` does. That is how
+      # @getknext/core@0.4.0 went to npm depending on `@getknext/lib: workspace:^`
+      # and became uninstallable (EUNSUPPORTEDPROTOCOL). This step rewrites the
+      # source manifests to `^<version>` so whatever tool publishes ships a
+      # resolvable range. Ephemeral (runner only) — the repo keeps `workspace:`.
+      - name: Rewrite workspace protocol ranges to concrete versions (publish fix)
+        run: node scripts/rewrite-workspace-ranges.mjs
+
+      # ── GUARD (pre): red the run BEFORE the credentialed publish if the fix
+      # above regressed. Packs each publishable package with `npm pack` — the
+      # SAME tool the publish shells to, so the tarball is faithful — and asserts
+      # no dependency still carries a `workspace:` spec AND the fixed group is
+      # internally coherent (one version, every sibling ^-dep satisfiable).
+      # Packing with `bun pm pack` would HIDE the leak (bun rewrites), which is
+      # exactly why audit-published.mjs missed it — `npm pack` is deliberate.
+      - name: Verify published group is safe to ship (pre-publish)
+        run: node scripts/verify-published-group.mjs --pre
+
       # Gate the publish command WITHOUT referencing `secrets` inside the action's
       # `with:` input (that expression caused GitHub startup-failure runs).
       #
@@ -462,3 +484,13 @@ jobs:
           # is what v2 uses for pushing; this is not redundant with it.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ── GUARD (post): the whole fixed group must have LANDED at one version ──
+      # Incident #1 was a PARTIAL publish — `core`+`db` shipped, `lib` skipped,
+      # so `core` needed a `lib` version that did not exist. This asks the
+      # registry whether every fixed-group member now resolves to the target
+      # version. A missing member or one stuck at the old version fails the job.
+      # Fail-closed on an unreachable registry (a reachability probe), mirroring
+      # publish-preflight.mjs — an unanswerable question is never a pass.
+      - name: Verify the whole group published coherently (post-publish)
+        run: node scripts/verify-published-group.mjs --post
