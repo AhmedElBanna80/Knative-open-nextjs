@@ -507,9 +507,33 @@ function providerOps(
  * build's upload/verify set. Uploads to the BUCKET stay additive — old builds'
  * remote objects are untouched; only the local staging area is rebuilt.
  *
+ * ## The `.knext-build` marker requires the deploy id (#924, mirroring #892)
+ *
+ * This function used to READ `.next/BUILD_ID` off disk and mark whatever it
+ * found. That is the exact over-delete #892 fixed on the vinext leg, un-fixed
+ * here: under `kn-next build` (turbopack) no `NEXT_DEPLOYMENT_ID` is exported
+ * and no revision is created, so `.next/BUILD_ID` holds Next's own generated id
+ * — a value no `apps.kn-next.dev/build-id` revision label can ever carry. A
+ * marker keyed on it makes the prefix a prune CANDIDATE that is permanently
+ * unprotectable: reapable, never protectable. ADR-0011 forbids that direction.
+ *
+ * So the marker is keyed on the caller's `buildId`, not on disk state — the
+ * same contract {@link stageNitroPublicAssets} enforces on the vinext leg:
+ *  - **no `buildId` ⇒ no marker** (over-kept forever, the safe direction, with
+ *    a warning). This is `kn-next build`, which creates no revision.
+ *  - a `buildId` is given ⇒ the write site ASSERTS `.next/BUILD_ID === buildId`
+ *    rather than trusting the caller (marker key ≡ protection key ≡ image tag ≡
+ *    CR `spec.buildId` by construction), and REFUSES a reserved segment. A
+ *    disagreement throws — never a marker written beside the real prefix.
+ *
  * @throws when `.next/static` is missing — the user has not run `next build`.
+ * @throws when `buildId` is a reserved static directory name.
+ * @throws when `buildId` is given but `.next/BUILD_ID` does not equal it.
  */
-export function stageStandaloneAssets(cwd: string = process.cwd()): string {
+export function stageStandaloneAssets(
+    cwd: string = process.cwd(),
+    buildId?: string,
+): string {
     const nextStaticDir = join(cwd, ".next", "static");
     const publicDir = join(cwd, "public");
     const stagingDir = join(cwd, ".output", "public");
@@ -520,6 +544,43 @@ export function stageStandaloneAssets(cwd: string = process.cwd()): string {
                 "(with output: 'standalone') before deploying, or pass " +
                 "--skip-upload to skip the asset upload.",
         );
+    }
+
+    // EVERY refusal happens BEFORE the copy — same discipline as
+    // stageNitroPublicAssets. The write site enforces the equality rather than
+    // trusting the caller to have enforced it.
+    if (buildId) {
+        // A reserved segment can never be a build-id (deny-list as
+        // defense-in-depth): marking it would scope the GC to a directory every
+        // build shares — the max-blast-radius over-delete.
+        if (RESERVED_STATIC_DIRS.has(buildId)) {
+            throw new Error(
+                `Refusing to stage a .knext-build marker for "${buildId}": ` +
+                    "that name is a shared static directory (" +
+                    `${[...RESERVED_STATIC_DIRS].sort().join(", ")}), not a ` +
+                    "build prefix. Marking it would let the GC reap assets " +
+                    "every build shares. Use a different deploy tag.",
+            );
+        }
+        // The write site enforces marker key ≡ protection key rather than
+        // trusting the caller. `.next/BUILD_ID` IS the standalone build prefix;
+        // if the deploy id the caller states does not equal it, a marker would
+        // name a phantom build the GC could reap while the chunks it protects
+        // stay unmarked.
+        const buildIdFile = join(cwd, ".next", "BUILD_ID");
+        const onDisk = existsSync(buildIdFile)
+            ? readFileSync(buildIdFile, "utf8").trim()
+            : "";
+        if (onDisk !== buildId) {
+            throw new Error(
+                `Refusing to stage a .knext-build marker for "${buildId}": ` +
+                    `.next/BUILD_ID is ${
+                        onDisk ? `"${onDisk}"` : "absent"
+                    }, not the stated deploy id. A marker whose key disagrees ` +
+                    "with the built prefix names a build the GC could reap " +
+                    "while the chunks it protects stay unmarked.",
+            );
+        }
     }
 
     // Rebuild the staging area from scratch: stale files from a previous
@@ -537,31 +598,27 @@ export function stageStandaloneAssets(cwd: string = process.cwd()): string {
     }
 
     // #264 marker inversion (ADR-0011): stage the `.knext-build` marker object
-    // into this build's `_next/static/<BUILD_ID>/` prefix. It rides the normal
+    // into this build's `_next/static/<buildId>/` prefix. It rides the normal
     // provider bulk upload AND the #75 verify-and-retry pass (it is part of the
     // staged file set), so every provider both writes it and PROVES it landed
     // remotely — a build whose marker is missing fails the deploy loudly. The
     // pruner deletes ONLY marker-carrying prefixes; a build uploaded without a
     // marker is permanently over-kept (documented transition/reclaim story).
-    const buildIdFile = join(cwd, ".next", "BUILD_ID");
-    if (existsSync(buildIdFile)) {
-        const buildId = readFileSync(buildIdFile, "utf8").trim();
-        // A reserved segment can never be a build-id (deny-list stays as
-        // defense-in-depth) and an empty id would scope to the static root.
-        if (buildId && !RESERVED_STATIC_DIRS.has(buildId)) {
-            const markerDir = join(stagingDir, "_next", "static", buildId);
-            mkdirSync(markerDir, { recursive: true });
-            writeFileSync(
-                join(markerDir, BUILD_MARKER_FILENAME),
-                `${buildId}\n`,
-            );
-        }
+    //
+    // #924: keyed on the caller's `buildId` (already asserted == .next/BUILD_ID
+    // above), NOT on disk state. No `buildId` ⇒ no marker ⇒ over-kept, the safe
+    // direction — this is `kn-next build`, which creates no revision.
+    if (buildId) {
+        const markerDir = join(stagingDir, "_next", "static", buildId);
+        mkdirSync(markerDir, { recursive: true });
+        writeFileSync(join(markerDir, BUILD_MARKER_FILENAME), `${buildId}\n`);
     } else {
         log.warn(
-            { buildIdFile },
-            "No .next/BUILD_ID — the .knext-build marker was not staged; " +
-                "this build's asset prefix will be over-kept by the GC " +
-                "(never reaped) until a marker-carrying re-upload",
+            "No deploy build id for this upload — no .knext-build marker " +
+                "staged, so these objects will be over-kept (never reaped) by " +
+                "`kn-next gc`. Expected for `kn-next build`, which creates no " +
+                "revision: nothing could ever protect the prefix, so marking " +
+                "it would make it reapable but never protectable.",
         );
     }
 
@@ -765,7 +822,7 @@ export async function uploadAssets(
     const nitroShape = (config.build ?? DEFAULT_BUILDER_ID) === "vinext";
     const assetsDir = nitroShape
         ? stageNitroPublicAssets(process.cwd(), buildId)
-        : stageStandaloneAssets(process.cwd());
+        : stageStandaloneAssets(process.cwd(), buildId);
 
     try {
         log.info(

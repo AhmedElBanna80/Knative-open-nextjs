@@ -49,18 +49,34 @@ afterEach(() => {
     rmSync(cwd, { recursive: true, force: true });
 });
 
+/** Every `.knext-build` object under `dir`, relative to it. */
+function standaloneMarkersUnder(dir: string): string[] {
+    const found: string[] = [];
+    const walk = (d: string): void => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+            if (e.isDirectory()) walk(join(d, e.name));
+            else if (e.name === BUILD_MARKER_FILENAME)
+                found.push(join(d, e.name).slice(dir.length + 1));
+        }
+    };
+    walk(dir);
+    return found;
+}
+
 describe("stageStandaloneAssets", () => {
-    it("stages .next/static under _next/static, copies public/, and writes the build marker", () => {
+    it("stages .next/static under _next/static, copies public/, and writes the marker keyed on the STATED deploy id (#924)", () => {
         seedBuild({ buildId: "bid1", withPublic: true });
 
-        const staging = stageStandaloneAssets(cwd);
+        // `kn-next deploy` (turbopack): the caller STATES the deploy id, and it
+        // equals .next/BUILD_ID, so the marker is keyed on it.
+        const staging = stageStandaloneAssets(cwd, "bid1");
 
         expect(
             existsSync(join(staging, "_next", "static", "bid1", "chunk.js")),
         ).toBe(true);
         // public/ files land at the staging root (bucket key-space root).
         expect(existsSync(join(staging, "favicon.ico"))).toBe(true);
-        // #264 marker in this build's prefix.
+        // #264 marker in this build's prefix, keyed on the deploy id.
         const marker = join(
             staging,
             "_next",
@@ -76,26 +92,79 @@ describe("stageStandaloneAssets", () => {
         expect(() => stageStandaloneAssets(cwd)).toThrow(/No \.next\/static/);
     });
 
-    it("stages without a marker (and warns) when .next/BUILD_ID is absent", () => {
-        // static present, but NO BUILD_ID file → marker not staged.
-        seedBuild({ withPublic: false });
+    it("stages NO marker when the caller states no build id — fail-safe over-keep (#924, the turbopack twin of #892)", () => {
+        // This is `kn-next build` on turbopack: it uploads assets but creates
+        // no revision and exports no NEXT_DEPLOYMENT_ID, so .next/BUILD_ID holds
+        // Next's own generated id — a value no revision label can ever carry.
+        // Marking it would make the prefix reapable-but-never-protectable (the
+        // #892 over-delete). Unmarked = over-kept forever, the safe direction.
+        seedBuild({ buildId: "next-generated-id", withPublic: false });
         const staging = stageStandaloneAssets(cwd);
-        expect(
-            existsSync(join(staging, "_next", "static", "bid1", "chunk.js")),
-        ).toBe(true);
+        // The assets are still staged — refusing to mark is not refusing to
+        // upload.
         expect(
             existsSync(
-                join(staging, "_next", "static", "bid1", BUILD_MARKER_FILENAME),
+                join(
+                    staging,
+                    "_next",
+                    "static",
+                    "next-generated-id",
+                    "chunk.js",
+                ),
             ),
-        ).toBe(false);
+        ).toBe(true);
+        // ...but NO marker anywhere, even though .next/BUILD_ID is on disk.
+        expect(standaloneMarkersUnder(staging)).toEqual([]);
+    });
+
+    it("REFUSES, deliberately, when the stated deploy id disagrees with .next/BUILD_ID (#924)", () => {
+        // The write site enforces marker key ≡ built prefix rather than trusting
+        // the caller. A marker keyed on an id the build was NOT produced under
+        // names a phantom build the GC could reap while the chunks it protects
+        // stay unmarked.
+        //
+        // Asserting on the REFUSAL message, not merely on throwing: with the
+        // equality check removed, `mkdirSync`/`writeFileSync` still succeed
+        // (the marker dir is created), so the marker is written under a phantom
+        // id and NOTHING throws — a `.toThrow()` alone would go GREEN on that
+        // mutation. This asserts the refusal string, which the mutation cannot
+        // produce.
+        seedBuild({ buildId: "actually-built-under-this", withPublic: false });
+        expect(() => stageStandaloneAssets(cwd, "claimed-this")).toThrow(
+            /Refusing to stage a \.knext-build marker/,
+        );
+        // ...and it names what WAS on disk, so the message is a diagnosis.
+        expect(() => stageStandaloneAssets(cwd, "claimed-this")).toThrow(
+            /actually-built-under-this/,
+        );
+    });
+
+    it("REFUSES when a deploy id is stated but .next/BUILD_ID is absent (#924)", () => {
+        // static present, but NO BUILD_ID file. A stated id cannot be matched
+        // against a missing prefix marker, so refuse rather than write a marker
+        // the build cannot back.
+        seedBuild({ withPublic: false }); // seeds .next/static/bid1 but no BUILD_ID
+        expect(() => stageStandaloneAssets(cwd, "some-tag")).toThrow(
+            /\.next\/BUILD_ID is absent/,
+        );
+    });
+
+    it("REFUSES a deploy id that is a shared static directory (#924)", () => {
+        // The vinext write site refuses this; the standalone twin must too.
+        // `--tag chunks` writes a marker INTO the cross-build `chunks/` prefix
+        // and hands the pruner a licence to reap assets every build shares.
+        seedBuild({ buildId: "chunks", withPublic: false });
+        expect(() => stageStandaloneAssets(cwd, "chunks")).toThrow(
+            /shared static directory/,
+        );
     });
 
     it("rebuilds the staging area from scratch on each run (no stale carryover)", () => {
         seedBuild({ buildId: "bid1", withPublic: false });
-        const staging = stageStandaloneAssets(cwd);
+        const staging = stageStandaloneAssets(cwd, "bid1");
         writeFileSync(join(staging, "STALE.txt"), "old");
         // Second run must clear the stale file.
-        stageStandaloneAssets(cwd);
+        stageStandaloneAssets(cwd, "bid1");
         expect(existsSync(join(staging, "STALE.txt"))).toBe(false);
     });
 });
