@@ -301,9 +301,10 @@ const MUTATIONS = [
   // WHAT THIS LOSES, STATED. Coverage of the scaffolded `start` script (old M15) and
   // of the Dockerfile's binary COPY destination. M15 is REPLACED below rather than
   // retired, because its subject survived the migration in a new spelling. The binary
-  // COPY destination has no assertion in `install-smoke.mjs` to grade against, so it
-  // is left uncovered and SAID SO here rather than papered over — filed as
-  // issue #930.
+  // COPY destination is now covered too: install-smoke reads the `COPY ${BINARY} <dest>`
+  // destination and the exec-form CMD/ENTRYPOINT target from the generated Dockerfile
+  // and requires them to be one path, and M23 below retargets the COPY to red it —
+  // closing #930, the gap this block used to only name.
   {
     id: 'M15',
     expect: 'red',
@@ -321,6 +322,25 @@ const MUTATIONS = [
         APP_PKG_TPL,
         '"start": "bun .output/server/index.mjs"',
         '"start": "bun .output/server.mjs"',
+        checkOnly,
+      ),
+    restore: () => git('checkout', '--', '.'),
+  },
+  {
+    id: 'M23',
+    expect: 'red',
+    guard:
+      'the binary COPY destination no longer matches the image CMD — the #857 shape on the ' +
+      'one Dockerfile path the smoke did not observe: `docker run` execs a path no COPY produced',
+    // The COPY destination and the CMD target are `/app/server` in the template and must
+    // stay equal. Retargeting only the COPY leaves the CMD pointing at nothing; before
+    // #930 install-smoke never read the COPY destination, so this survived. It anchors the
+    // same line M12 does, but the two are applied one at a time, so each is exactly-once.
+    apply: (checkOnly) =>
+      mutate(
+        DOCKERFILE_TPL,
+        'COPY ${BINARY} /app/server\n',
+        'COPY ${BINARY} /app/elsewhere\n',
         checkOnly,
       ),
     restore: () => git('checkout', '--', '.'),
