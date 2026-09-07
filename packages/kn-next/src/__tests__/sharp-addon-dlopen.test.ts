@@ -550,6 +550,25 @@ describe("sharp addon integrity verification", () => {
         expect(r.stderr).toContain("evil.node");
     });
 
+    it("REFUSES a manifest whose declared schema version it does not understand", () => {
+        // #929: the manifest carries a schema `version`; the field exists so the
+        // reader can refuse an unknown shape (a future format bump the verifier
+        // predates, or a corrupted/rogue manifest). Bumping it must be fatal, the
+        // same fail-closed posture a missing/tampered payload already gets — not
+        // read as if valid. Every listed payload still matches, so ONLY the
+        // version is wrong.
+        const { dir, addon, manifest } = stageVerifiable();
+        const parsed = JSON.parse(readFileSync(manifest, "utf8"));
+        parsed.version = 99;
+        writeFileSync(manifest, JSON.stringify(parsed));
+
+        const r = loadShim(addon, dir);
+        expect(r.status).not.toBe(0);
+        expect(r.stdout).not.toContain("DLOPENED");
+        expect(r.stderr).toContain("refusing to dlopen");
+        expect(r.stderr).toContain("schema version");
+    });
+
     it("warns and loads when there is no manifest — never bricks an older image", () => {
         // Images built before this landed have no manifest. Failing closed on
         // absence would turn a security improvement into a fleet outage, so

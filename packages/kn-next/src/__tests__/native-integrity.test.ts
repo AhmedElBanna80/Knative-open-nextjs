@@ -43,6 +43,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
     INTEGRITY_MANIFEST_NAME,
+    NATIVE_INTEGRITY_SCHEMA_VERSION,
     readImgPackageVersions,
     readLockfilePackages,
     writeNativeIntegrityManifest,
@@ -134,6 +135,9 @@ describe("native tree integrity manifest — staging", () => {
         const manifest = readManifest(nativeDir);
 
         expect(manifest.algorithm).toBe("sha256");
+        // #929: the emitted schema `version` is the shared constant, so the
+        // writer and the reader cannot drift to different literals.
+        expect(manifest.version).toBe(NATIVE_INTEGRITY_SCHEMA_VERSION);
         // The addon is the file the shim dlopens, so it MUST be covered.
         expect(manifest.files["sharp-linux-x64/lib/sharp-linux-x64.node"]).toBe(
             createHash("sha256").update(readFileSync(addon)).digest("hex"),
@@ -526,5 +530,41 @@ describe("the scaffold template ships the manifest with the tree", () => {
         expect(dockerfile).toMatch(
             /RUN test -f \/app\/native\/\.integrity\.json/,
         );
+    });
+});
+
+describe("#929 writer and reader agree on the schema version", () => {
+    // The writer's emitted `version` and the reader's accepted `version` must be
+    // tied in BOTH directions: bumping one literal without the other reds. The
+    // shim is self-contained (its text is injected into sharp's module slot), so
+    // it cannot import the constant — it carries its own literal, and this test
+    // is what keeps the two from drifting.
+    const shimSource = readFileSync(
+        join(
+            dirname(import.meta.dirname),
+            "adapters",
+            "sharp-addon-dlopen.mjs",
+        ),
+        "utf8",
+    );
+
+    it("the shim's accepted schema version equals the writer's constant", () => {
+        const match = shimSource.match(
+            /NATIVE_INTEGRITY_SCHEMA_VERSION\s*=\s*(\d+)/,
+        );
+        expect(
+            match,
+            "the shim must declare NATIVE_INTEGRITY_SCHEMA_VERSION",
+        ).not.toBeNull();
+        expect(Number((match as RegExpMatchArray)[1])).toBe(
+            NATIVE_INTEGRITY_SCHEMA_VERSION,
+        );
+    });
+
+    it("the shim asserts the manifest's version before trusting it", () => {
+        // The gap #929 closes: the field was written and never read. The shim
+        // must compare against its constant, not merely parse the manifest.
+        expect(shimSource).toContain("NATIVE_INTEGRITY_SCHEMA_VERSION");
+        expect(shimSource).toContain("schema version");
     });
 });
