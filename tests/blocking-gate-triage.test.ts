@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { absTmpdir } from './helpers/abs-tmp';
 import {
   classifyTriggerShape,
   type TriageEntry,
@@ -153,7 +153,7 @@ describe('the unconverted-guard triage checks itself', () => {
  * succeeded.
  */
 describe('classifyTriggerShape', () => {
-  const TMP = mkdtempSync(join(tmpdir(), 'triage-shape-'));
+  const TMP = mkdtempSync(join(absTmpdir(), 'triage-shape-'));
   afterAll(() => {
     rmSync(TMP, { recursive: true, force: true });
   });

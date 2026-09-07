@@ -8,10 +8,10 @@ setDefaultTimeout(30_000);
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { blankNonCode } from '../scripts/lib/blank-non-code.mjs';
 import { codeWithLiterals } from '../scripts/lib/prover-lane.mjs';
+import { absTmpdir } from './helpers/abs-tmp';
 import { auditBlockingGate, type BlockingGateOptions } from './helpers/blocking-gate';
 
 /**
@@ -36,7 +36,7 @@ import { auditBlockingGate, type BlockingGateOptions } from './helpers/blocking-
  * on a string substitution having succeeded.
  */
 
-const TMP = mkdtempSync(join(tmpdir(), 'blocking-gate-'));
+const TMP = mkdtempSync(join(absTmpdir(), 'blocking-gate-'));
 afterAll(() => {
   rmSync(TMP, { recursive: true, force: true });
 });
