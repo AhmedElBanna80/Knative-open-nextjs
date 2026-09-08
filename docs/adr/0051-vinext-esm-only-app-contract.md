@@ -1,8 +1,8 @@
 # ADR-0051: the vinext build target supports ESM Next.js apps only
 
-- **Status:** **Proposed (awaiting founder + architect endorsement).** Scoping what the product
-  supports is a founder call — like ADR-0001 — so this ADR records the decision and its evidence
-  but does **not** mark itself Accepted. It takes effect only once endorsed.
+- **Status:** **Accepted (founder-endorsed 2026-09-08).** Scoping what the product supports is a
+  founder call — like ADR-0001 — and the founder endorsed ESM-only as the vinext ship contract.
+  Architect + system-designer signed off on the honesty of the compat-claim scoping (PR #1032).
 - **Date:** 2026-09-08
 - **Amends / relates:** **ADR-0048** (vinext + Bun single executable as the only target) and
   **ADR-0042** (vinext + Bun bytecode as the default runtime). ADR-0042 already listed an "ESM
