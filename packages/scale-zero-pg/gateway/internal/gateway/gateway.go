@@ -110,6 +110,134 @@ type Gateway struct {
 	mu     sync.Mutex
 	active map[string]*activeEntry
 	closed bool
+
+	// wg tracks every connection enrolled for graceful drain. Add(1) happens
+	// ONCE per connection at handle-entry (registerConn), under g.mu together with
+	// the g.closed check — so it is refused, never raced, once Drain has marked the
+	// gateway closed (the sync.WaitGroup Add-from-zero contract). Done() runs once,
+	// in the once-guarded connReg.cleanup, on whichever exit path the connection
+	// takes. Drain waits on it so an in-flight session — INCLUDING one still waking
+	// a cold compute or handshaking — is allowed to finish on SIGTERM instead of
+	// being reset (issue #1016).
+	wg sync.WaitGroup
+	// live holds every connection currently enrolled for drain (from accept, not
+	// just those already piping), so Drain can force-close whatever is left when
+	// its deadline expires — cancelling an in-progress wake and closing the conns.
+	live    map[uint64]*connReg
+	liveSeq uint64
+
+	// onConnRegistered, when non-nil, fires inside registerConn right after wg.Add
+	// while g.mu is held. Test-only seam to observe the accept->wg window; nil in
+	// production.
+	onConnRegistered func()
+}
+
+// connReg is one connection's drain enrollment, created at handle-entry. It owns
+// the single wg.Done for the connection (via the once-guarded cleanup) and lets
+// Drain force-close a connection at any phase — including while it is still waking
+// a cold compute (no backend conn yet) or handshaking. All mutable fields are
+// guarded by mu because Drain's force-close races the owning goroutine.
+type connReg struct {
+	g  *Gateway
+	id uint64
+
+	mu         sync.Mutex
+	client     net.Conn           // client side; reassigned on a TLS upgrade
+	conn       net.Conn           // backend side; nil until the wake connects
+	cancelWake context.CancelFunc // cancels an in-progress ConnectWithWake
+	// metrics accounting owed to cleanup once proxy has opened the compute slot.
+	opened      bool
+	target      wake.Target
+	replication bool
+
+	once sync.Once
+}
+
+// setClient swaps the tracked client conn (used when handle upgrades to TLS) so a
+// force-close tears down the encrypted conn the session is actually using.
+func (r *connReg) setClient(c net.Conn) {
+	r.mu.Lock()
+	r.client = c
+	r.mu.Unlock()
+}
+
+// bindWake records the cancel func for the in-flight wake so Drain can abort it.
+func (r *connReg) bindWake(cancel context.CancelFunc) {
+	r.mu.Lock()
+	r.cancelWake = cancel
+	r.mu.Unlock()
+}
+
+// bindBackend records the compute conn and the metrics accounting owed on close,
+// once the wake has connected. From here force-close also closes the backend.
+func (r *connReg) bindBackend(conn net.Conn, target wake.Target, replication bool) {
+	r.mu.Lock()
+	r.conn = conn
+	r.opened = true
+	r.target = target
+	r.replication = replication
+	r.mu.Unlock()
+}
+
+// markOpened records that proxy has taken the compute slot (connStarted+ConnOpen)
+// so cleanup releases it exactly once even if the wake then fails before a backend
+// conn exists.
+func (r *connReg) markOpened(target wake.Target, replication bool) {
+	r.mu.Lock()
+	r.opened = true
+	r.target = target
+	r.replication = replication
+	r.mu.Unlock()
+}
+
+// setBackend updates the tracked backend conn (a handshake retry may swap it) so
+// force-close always closes the conn the gateway is actually blocked on.
+func (r *connReg) setBackend(conn net.Conn) {
+	r.mu.Lock()
+	r.conn = conn
+	r.mu.Unlock()
+}
+
+// cleanup runs exactly once on whatever exit path the connection takes: it
+// releases the compute slot (if opened), removes the live entry, closes both
+// conns, and fires the single wg.Done that pairs with the handle-entry wg.Add.
+func (r *connReg) cleanup() {
+	r.once.Do(func() {
+		r.mu.Lock()
+		client, conn := r.client, r.conn
+		opened, target, replication := r.opened, r.target, r.replication
+		r.mu.Unlock()
+		if opened {
+			r.g.metrics.ConnClose(target.Key)
+			r.g.connEnded(target, replication)
+		}
+		r.g.unregisterLive(r.id)
+		if client != nil {
+			_ = client.Close()
+		}
+		if conn != nil {
+			_ = conn.Close()
+		}
+		r.g.wg.Done()
+	})
+}
+
+// forceClose is called by Drain on its deadline: cancel any in-progress wake and
+// close both conns so the owning goroutine unblocks and reaches cleanup. It does
+// NOT call wg.Done — the owning goroutine still owns that via cleanup.
+func (r *connReg) forceClose() {
+	r.mu.Lock()
+	cancel, client, conn := r.cancelWake, r.client, r.conn
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if client != nil {
+		_ = client.Close()
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
 }
 
 // New builds a Gateway from injected env config.
@@ -274,7 +402,9 @@ func (g *Gateway) Serve(ln net.Listener) {
 	}
 }
 
-// Close marks the gateway closed (idle timers stop scheduling new sleeps).
+// Close marks the gateway closed (idle timers stop scheduling new sleeps). It is
+// the immediate, non-blocking stop; use Drain for a graceful, bounded shutdown
+// that lets in-flight sessions finish.
 func (g *Gateway) Close() error {
 	g.mu.Lock()
 	g.closed = true
@@ -288,8 +418,99 @@ func (g *Gateway) Close() error {
 	return nil
 }
 
+// Drain performs a graceful, bounded shutdown mirroring the app runtime's
+// gracefulShutdown contract (packages/kn-next/src/adapters/shutdown.ts): stop
+// scheduling sleeps, then wait for every in-flight proxied session to finish so
+// no in-flight Postgres query/transaction/COPY/replication stream is reset on
+// SIGTERM. The wait is bounded by ctx; when it expires the remaining sessions'
+// client+compute conns are force-closed so the process exits within the pod's
+// terminationGracePeriodSeconds instead of hanging. Safe to call with zero
+// in-flight connections (returns nil immediately). The caller closes the
+// listener first so no NEW connections are accepted while Drain runs (issue
+// #1016).
+func (g *Gateway) Drain(ctx context.Context) error {
+	_ = g.Close() // mark closed, stop pending idle timers
+
+	done := make(chan struct{})
+	go func() {
+		g.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		// Deadline hit: force-close every enrolled connection — cancelling an
+		// in-progress wake AND closing both conns — so the owning goroutine (a
+		// pipe, a blocked handshake read, or a polling wake) unblocks, runs its
+		// cleanup, and the process can exit within terminationGracePeriodSeconds.
+		g.mu.Lock()
+		regs := make([]*connReg, 0, len(g.live))
+		for _, r := range g.live {
+			regs = append(regs, r)
+		}
+		g.mu.Unlock()
+		for _, r := range regs {
+			r.forceClose()
+		}
+		g.wg.Wait() // goroutines now unblock; cleanup runs the single wg.Done each
+		return ctx.Err()
+	}
+}
+
+// registerConn enrolls a freshly-accepted connection for graceful drain. Under
+// g.mu it refuses new work once the gateway is closed (draining) — returning
+// (nil, false) so the caller closes the client and returns — and otherwise does
+// the single wg.Add(1) for the connection plus a live-set entry. Doing Add under
+// the same lock that sets/reads g.closed makes the Add happen-before any Drain
+// Wait that observed closed, which is the sync.WaitGroup Add-from-zero contract.
+func (g *Gateway) registerConn(client net.Conn) (*connReg, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return nil, false
+	}
+	g.wg.Add(1)
+	if g.live == nil {
+		g.live = map[uint64]*connReg{}
+	}
+	g.liveSeq++
+	id := g.liveSeq
+	r := &connReg{g: g, id: id, client: client}
+	g.live[id] = r
+	if g.onConnRegistered != nil {
+		g.onConnRegistered()
+	}
+	return r, true
+}
+
+// unregisterLive removes a connection from the live set once it has fully closed.
+func (g *Gateway) unregisterLive(id uint64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.live, id)
+}
+
 // handle reads the initial packet(s), declines SSL/GSS, then proxies a startup.
+// The connection is enrolled for graceful drain at ENTRY (registerConn), before
+// any wake/handshake, so a SIGTERM during a cold wake still drains it. A closed
+// gateway refuses the connection outright. The single wg.Done is owned by
+// reg.cleanup: handle fires it on every non-piping exit via the deferred guard,
+// and hands ownership to the pipe goroutines once piping starts (piping=true).
 func (g *Gateway) handle(client net.Conn) {
+	reg, ok := g.registerConn(client)
+	if !ok {
+		_ = client.Close() // draining: refuse new work
+		return
+	}
+	piping := false
+	defer func() {
+		if !piping {
+			reg.cleanup()
+		}
+	}()
+
 	start := time.Now()
 	var buf []byte
 	readBuf := make([]byte, 4096)
@@ -330,6 +551,7 @@ func (g *Gateway) handle(client net.Conn) {
 					}
 					_ = tlsConn.SetDeadline(time.Time{})
 					client = tlsConn
+					reg.setClient(tlsConn) // force-close must tear down the TLS conn
 					buf = nil
 					continue // client now sends the real StartupMessage over TLS
 				}
@@ -387,7 +609,7 @@ func (g *Gateway) handle(client net.Conn) {
 				}
 				pending := append([]byte(nil), rest...)
 				_ = client.SetReadDeadline(time.Time{})
-				g.proxy(client, startup, pending, target, msg.Params, replication, start)
+				piping = g.proxy(client, startup, pending, target, msg.Params, replication, start, reg)
 				return
 			}
 		}
@@ -526,35 +748,48 @@ func (g *Gateway) wakeBudgetRefused(client net.Conn, start time.Time) {
 // stream so the compute (a publisher) is NOT scaled to zero while WAL is flowing
 // (ADR-0007 §4c). Post-handshake the pipe is protocol-agnostic, so the CopyBoth
 // replication stream flows through the same byte pump as ordinary query traffic.
-func (g *Gateway) proxy(client net.Conn, startupPacket, pendingRest []byte, target wake.Target, params map[string]string, replication bool, start time.Time) {
+// proxy returns piping=true once the two io.Copy goroutines have started and taken
+// over ownership of reg.cleanup (the single wg.Done); it returns false on every
+// pre-piping failure, leaving handle's deferred guard to run reg.cleanup. reg was
+// enrolled for drain at handle-entry, so the whole wake+handshake below is already
+// covered by Drain — a SIGTERM here force-closes the conns and cancels the wake.
+func (g *Gateway) proxy(client net.Conn, startupPacket, pendingRest []byte, target wake.Target, params map[string]string, replication bool, start time.Time, reg *connReg) bool {
 	g.connStarted(target, replication)
 	g.metrics.ConnOpen(target.Key)
+	// The compute slot is now taken; cleanup owes ConnClose+connEnded on every exit.
+	reg.markOpened(target, replication)
 	if replication {
 		g.metrics.ReplicationConn()
 		g.log("[gw] " + target.Key + ": replication stream opening (db=" + params["database"] + " user=" + params["user"] + ") — holding publisher awake while WAL flows")
 	}
 
-	conn, woke, wakeMs, err := wake.ConnectWithWake(context.Background(), g.driver, target, g.opts, func() {
+	// Cancelable wake context so a drain deadline aborts an in-progress cold wake
+	// instead of waiting the full GW_WAKE_TIMEOUT_MS (force-close calls cancel).
+	wakeCtx, cancelWake := context.WithCancel(context.Background())
+	defer cancelWake()
+	reg.bindWake(cancelWake)
+
+	conn, woke, wakeMs, err := wake.ConnectWithWake(wakeCtx, g.driver, target, g.opts, func() {
 		g.log("[gw] " + target.Key + ": compute asleep, waking (db=" + params["database"] + " user=" + params["user"] + ")")
 	})
 	if err != nil {
-		g.metrics.ConnClose(target.Key)
-		g.connEnded(target, replication)
 		// Wake budget exhausted (issue #116): a DELIBERATE refusal to scale, NOT a
 		// cold-start failure. Count it separately (so it never trips the wake-failure
 		// pager) and return a clean, transient refusal the client can retry — the
-		// compute was never touched.
+		// compute was never touched. Slot release + close + wg.Done run in cleanup.
 		if errors.Is(err, wake.ErrWakeBudgetExceeded) {
 			g.metrics.WakeBudgetExceeded(target.Key)
 			g.log("[gw] " + target.Key + ": wake budget exceeded — refusing to scale (issue #116; db=" + params["database"] + " user=" + params["user"] + ")")
 			g.wakeBudgetRefused(client, start)
-			return
+			return false
 		}
 		g.metrics.WakeFailure()
 		g.log("[gw] " + target.Key + ": " + err.Error())
 		g.computeUnavailable(client, params, start, err)
-		return
+		return false
 	}
+	// Backend connected: record it so a drain-deadline force-closes it too.
+	reg.bindBackend(conn, target, replication)
 	if woke {
 		g.metrics.Wake(target.Key, wakeMs)
 		g.log("[gw] " + target.Key + ": awake in " + strconv.FormatInt(wakeMs, 10) + "ms")
@@ -574,47 +809,37 @@ func (g *Gateway) proxy(client net.Conn, startupPacket, pendingRest []byte, targ
 	// Readiness handshake: a freshly started Postgres accepts TCP before it
 	// can serve and FATALs the startup with 57P03 ("the database system is
 	// starting up"). Absorb those and retry the handshake until the backend
-	// answers for real — the client must never see the transient FATAL.
-	conn, firstReply, err := g.handshakeUntilReady(conn, startupPacket, target)
+	// answers for real — the client must never see the transient FATAL. The wake
+	// ctx is threaded through so a drain deadline aborts a reconnect mid-handshake.
+	conn, firstReply, err := g.handshakeUntilReady(wakeCtx, reg, conn, startupPacket, target)
 	if err != nil {
 		g.metrics.WakeFailure()
-		g.metrics.ConnClose(target.Key)
-		g.connEnded(target, replication)
 		g.log("[gw] " + target.Key + ": " + err.Error())
 		g.computeUnavailable(client, params, start, err)
-		return
+		return false
 	}
 	if len(firstReply) > 0 {
 		if _, err := client.Write(firstReply); err != nil {
-			g.metrics.ConnClose(target.Key)
-			g.connEnded(target, replication)
-			_ = client.Close()
-			_ = conn.Close()
-			return
+			return false
 		}
 	}
 	if len(pendingRest) > 0 {
 		_, _ = conn.Write(pendingRest)
 	}
 
-	var once sync.Once
-	cleanup := func() {
-		once.Do(func() {
-			g.metrics.ConnClose(target.Key)
-			g.connEnded(target, replication)
-			_ = client.Close()
-			_ = conn.Close()
-		})
-	}
-	go func() { _, _ = io.Copy(conn, client); cleanup() }()
-	go func() { _, _ = io.Copy(client, conn); cleanup() }()
+	// Piping starts: the two goroutines take over reg.cleanup (the single wg.Done
+	// paired with the handle-entry wg.Add). handle sees piping=true and does not
+	// run cleanup itself.
+	go func() { _, _ = io.Copy(conn, client); reg.cleanup() }()
+	go func() { _, _ = io.Copy(client, conn); reg.cleanup() }()
+	return true
 }
 
 // handshakeUntilReady writes the startup packet and peeks at the backend's
 // first reply. While the reply is FATAL 57P03 (crash recovery / starting up),
 // it reconnects and retries until the wake deadline. On success it returns
 // the (possibly new) backend conn plus the first reply bytes to forward.
-func (g *Gateway) handshakeUntilReady(conn net.Conn, startupPacket []byte, target wake.Target) (net.Conn, []byte, error) {
+func (g *Gateway) handshakeUntilReady(ctx context.Context, reg *connReg, conn net.Conn, startupPacket []byte, target wake.Target) (net.Conn, []byte, error) {
 	deadline := time.Now().Add(time.Duration(g.opts.WakeTimeoutMs) * time.Millisecond)
 	retry := time.Duration(g.opts.RetryMs) * time.Millisecond
 	// Readiness reconnects belong to an ALREADY-authorized, already-budgeted wake
@@ -632,6 +857,12 @@ func (g *Gateway) handshakeUntilReady(conn net.Conn, startupPacket []byte, targe
 		typ, raw, err := proto.ReadBackendMessage(conn)
 		_ = conn.SetReadDeadline(time.Time{})
 		if err != nil {
+			// A drain force-close cancels ctx and closes conn: abort promptly
+			// rather than treating it as a starting-up backend to reconnect to.
+			if ctx.Err() != nil {
+				_ = conn.Close()
+				return nil, nil, ctx.Err()
+			}
 			if ne, ok := err.(net.Error); ok && ne.Timeout() && len(raw) > 0 {
 				// Slow but alive: hand what arrived to the pipe.
 				return conn, raw, nil
@@ -644,11 +875,12 @@ func (g *Gateway) handshakeUntilReady(conn net.Conn, startupPacket []byte, targe
 					return nil, nil, errors.New("backend kept dropping the handshake past the wake deadline")
 				}
 				time.Sleep(retry)
-				next, _, _, cerr := wake.ConnectWithWake(context.Background(), g.driver, target, retryOpts, nil)
+				next, _, _, cerr := wake.ConnectWithWake(ctx, g.driver, target, retryOpts, nil)
 				if cerr != nil {
 					return nil, nil, cerr
 				}
 				conn = next
+				reg.setBackend(conn) // track the swapped conn for force-close
 				continue
 			}
 			// Partial reply then error: forward what we have; the pipe's
@@ -663,11 +895,28 @@ func (g *Gateway) handshakeUntilReady(conn net.Conn, startupPacket []byte, targe
 			return nil, nil, errors.New("backend kept reporting 57P03 (starting up) past the wake deadline")
 		}
 		time.Sleep(retry)
-		next, _, _, err := wake.ConnectWithWake(context.Background(), g.driver, target, retryOpts, nil)
+		// A drain force-close cancels ctx during the sleep above. Unlike the
+		// interruptible read at the top of the loop, that sleep is not ctx-guarded
+		// and the reconnect below can succeed without observing ctx (a backend in
+		// crash recovery still accepts TCP, so ConnectWithWake's early-success path
+		// returns a live conn regardless of ctx). Check here so the force-close is
+		// honored promptly instead of spinning until the wake deadline.
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		next, _, _, err := wake.ConnectWithWake(ctx, g.driver, target, retryOpts, nil)
 		if err != nil {
 			return nil, nil, err
 		}
 		conn = next
+		reg.setBackend(conn) // track the swapped conn for force-close
+		// Belt-and-suspenders: ConnectWithWake's early-success (TryConnect) path can
+		// return without observing ctx, so re-check before looping back into another
+		// interruptible read — a force-close during the dial must abort here too.
+		if ctx.Err() != nil {
+			_ = conn.Close()
+			return nil, nil, ctx.Err()
+		}
 		if tcp, ok := conn.(*net.TCPConn); ok {
 			_ = tcp.SetNoDelay(true)
 		}

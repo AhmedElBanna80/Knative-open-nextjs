@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -57,6 +58,11 @@ func main() {
 	logger.Printf("[gw] listening on :%d mode=%s idle_ms=%d", port, gw.Driver().Mode(), envInt("GW_IDLE_MS", 300000))
 	go gw.Serve(ln)
 
+	// RO lane handles, wired below if GW_RO_PORT is set; drained on SIGTERM
+	// alongside the writer lane (issue #1016).
+	var roLnActive net.Listener
+	var roGwActive *gateway.Gateway
+
 	// Read-only pool lane (issue #66): a SECOND listener on GW_RO_PORT routes
 	// the DATABASE_URL_RO DSN to a read-only compute (0->N->0), reusing the full
 	// wake/idle/TLS machinery via a GW_RO_*-remapped env. Absent GW_RO_PORT, the
@@ -90,7 +96,7 @@ func main() {
 			roPort, os.Getenv("GW_RO_DEPLOYMENT"), envInt("GW_RO_WAKE_REPLICAS", 1),
 			envInt("GW_RO_IDLE_MS", envInt("GW_IDLE_MS", 300000)))
 		go roGw.Serve(roLn)
-		defer func() { _ = roLn.Close(); _ = roGw.Close() }()
+		roLnActive, roGwActive = roLn, roGw
 	}
 
 	metricsSrv := &http.Server{Addr: ":" + strconv.Itoa(metricsPort), Handler: gw.Metrics().Handler()}
@@ -106,8 +112,29 @@ func main() {
 	<-sig
 	logger.Println("[gw] shutting down")
 
+	// Stop accepting new connections on BOTH lanes first, then gracefully drain
+	// in-flight proxied sessions — bounded by GW_DRAIN_DEADLINE_MS — so no
+	// in-flight Postgres session is reset on scale-down/redeploy (issue #1016).
+	// terminationGracePeriodSeconds in deploy/10-gateway.yaml must cover this.
 	_ = ln.Close()
-	_ = gw.Close()
+	if roLnActive != nil {
+		_ = roLnActive.Close()
+	}
+	drainMs := envInt("GW_DRAIN_DEADLINE_MS", 25000)
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), time.Duration(drainMs)*time.Millisecond)
+	logger.Printf("[gw] draining in-flight connections (deadline %dms)", drainMs)
+	if roGwActive != nil {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() { defer wg.Done(); _ = roGwActive.Drain(drainCtx) }()
+		_ = gw.Drain(drainCtx)
+		wg.Wait()
+	} else {
+		_ = gw.Drain(drainCtx)
+	}
+	drainCancel()
+	logger.Println("[gw] drain complete")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = metricsSrv.Shutdown(ctx)
