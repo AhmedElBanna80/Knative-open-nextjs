@@ -1,0 +1,226 @@
+/**
+ * The vinext-axis compat lane's toolchain install must satisfy EVERY peer that
+ * vinext declares — not just react.
+ *
+ * ## The defects this guards
+ *
+ * ### First edge (compat run 34030824905: 310 passed / 468 failed)
+ *
+ * Every failure was the identical `npm ERESOLVE`:
+ *
+ *   peer react@"^19.2.6" from vinext@1.0.0-beta.8
+ *   Found: react@19.2.4
+ *
+ * `scripts/e2e-deploy-vinext.sh` pinned `react-server-dom-webpack@19.2.6` but not
+ * `react`/`react-dom`; each corpus fixture pulls `react@19.2.4` transitively via
+ * `next@16.2`, which does not satisfy vinext-beta.8's `react@^19.2.6` peer, so
+ * `npm install` aborts before the fixture ever builds.
+ *
+ * ### Second edge (hidden behind the first)
+ *
+ * npm reports only ONE conflict edge at a time, so fixing the react family only
+ * uncovered the next: the script pinned `@vitejs/plugin-rsc@0.5.26`, but
+ * vinext-beta.8 declares `@vitejs/plugin-rsc@^0.5.34`. That peer is `optional`,
+ * but because the toolchain install pulls the package EXPLICITLY, npm enforces
+ * the range anyway — so every fixture install still hard-failed on plugin-rsc.
+ * Verified out-of-band: with `@vitejs/plugin-rsc@0.5.34` the full toolchain
+ * install resolves cleanly (178 packages, `npm install --dry-run` exit 0); with
+ * 0.5.26 it exits 1 on the plugin-rsc `peerOptional` conflict.
+ *
+ * ## Why pins, not `--legacy-peer-deps`
+ *
+ * `--legacy-peer-deps`/`--force` would make the ERESOLVE go away while leaving a
+ * REAL version skew between vinext's compiled transforms and the app's packages —
+ * a latent correctness hazard the lane exists to surface honestly. Pinning each
+ * peer at a version inside vinext's declared range keeps the toolchain coherent.
+ *
+ * ## What this guard asserts
+ *
+ * The single toolchain `npm install` must pin EVERY package that is also a vinext
+ * peer at a version that SATISFIES vinext-beta.8's declared peer range. This is
+ * the real success condition — a future peer bump the script does not follow (as
+ * plugin-rsc's `^0.5.34` was not) reds the guard, not just react drift. Plus the
+ * React family stays coherent (all three move together) and the install never
+ * falls back to `--legacy-peer-deps`/`--force`.
+ *
+ * vinext's peer ranges are hardcoded below because `vinext` is not resolvable in
+ * the unit test env. They are keyed to `VINEXT_VERSION`; the guard fails if the
+ * script's pinned vinext version drifts from the version these ranges describe,
+ * forcing a maintainer to re-read the peers when vinext bumps.
+ */
+
+import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const DEPLOY_SCRIPT = 'scripts/e2e-deploy-vinext.sh';
+
+/**
+ * vinext@1.0.0-beta.8's declared `peerDependencies` (from `npm view vinext@…`),
+ * restricted to the packages `e2e-deploy-vinext.sh` installs. When VINEXT_VERSION
+ * bumps, re-run `npm view vinext@<v> peerDependencies` and update BOTH the ranges
+ * and PEER_VINEXT_VERSION below.
+ */
+const PEER_VINEXT_VERSION = '1.0.0-beta.8';
+const VINEXT_PEER_RANGES: Record<string, string> = {
+  vite: '^8.0.0',
+  react: '^19.2.6',
+  'react-dom': '^19.2.6',
+  '@vitejs/plugin-rsc': '^0.5.34',
+  'react-server-dom-webpack': '^19.2.6',
+};
+
+/** Script body with full-line comments removed — a prose mention in the header
+ *  must not satisfy an assertion about the executable install command. */
+function code(): string {
+  return readFileSync(resolve(repoRoot, DEPLOY_SCRIPT), 'utf8')
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+}
+
+/**
+ * Defaults of `VAR="${ENV:-default}"` shell assignments, so a `"pkg@${VAR}"`
+ * token in the install command can be resolved to the concrete pinned version.
+ */
+function shellVarDefaults(): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const line of code().split('\n')) {
+    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)="\$\{[A-Za-z0-9_]+:-([^}]+)\}"/);
+    if (m) vars[m[1] as string] = m[2] as string;
+  }
+  return vars;
+}
+
+/**
+ * The single `npm install` invocation that pulls the vinext toolchain, as one
+ * logical line (backslash-newline continuations folded). Selected by the vinext
+ * package it installs, so an unrelated `npm install` elsewhere cannot match.
+ */
+function toolchainInstall(): string {
+  const folded = code().replace(/\\\n/g, ' ');
+  const lines = folded
+    .split('\n')
+    .filter((l) => /\bnpm\s+i(nstall)?\b/.test(l) && /vinext@/.test(l));
+  if (lines.length !== 1) {
+    throw new Error(`expected exactly one vinext toolchain npm install, found ${lines.length}`);
+  }
+  return lines[0] as string;
+}
+
+/** The raw `<pkg>@<spec>` right-hand side in the install command (may be a
+ *  `${VAR}` reference or a literal version). */
+function pinnedSpec(install: string, pkg: string): string | undefined {
+  // Anchored on a word boundary so `react@` does not match inside `react-dom@`
+  // or `react-server-dom-webpack@`.
+  const re = new RegExp(`(?:^|[\\s"'])${pkg.replace(/[-/@.]/g, '\\$&')}@([^\\s"']+)`);
+  return install.match(re)?.[1];
+}
+
+/** Resolve a spec token to a concrete version, dereferencing `${VAR}`. */
+function resolvePin(spec: string | undefined, vars: Record<string, string>): string | undefined {
+  if (!spec) return undefined;
+  const varMatch = spec.match(/^\$\{([A-Za-z0-9_]+)\}$/);
+  return varMatch ? vars[varMatch[1] as string] : spec;
+}
+
+/** The concrete pinned version of `pkg` in the toolchain install. */
+function pinnedVersion(pkg: string): string | undefined {
+  return resolvePin(pinnedSpec(toolchainInstall(), pkg), shellVarDefaults());
+}
+
+/**
+ * Minimal caret-range satisfaction for exact versions — sufficient because every
+ * vinext peer range is a caret range and every script pin is an exact version.
+ *   ^1.2.3 -> >=1.2.3 <2.0.0
+ *   ^0.5.34 -> >=0.5.34 <0.6.0   (0.x locks the minor)
+ *   ^0.0.3 -> >=0.0.3 <0.0.4     (0.0.x locks the patch)
+ */
+function caretSatisfies(version: string, range: string): boolean {
+  const caret = range.match(/^\^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/);
+  const ver = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/);
+  if (!caret || !ver) return false;
+  const [, cMaj, cMin, cPat] = caret.map(Number) as unknown as number[];
+  const [, vMaj, vMin, vPat] = ver.map(Number) as unknown as number[];
+
+  const cmp = (a: number, b: number) => a - b;
+  // lower bound: version >= caret base
+  const geBase =
+    cmp(vMaj, cMaj) > 0 ||
+    (vMaj === cMaj && (cmp(vMin, cMin) > 0 || (vMin === cMin && cmp(vPat, cPat) >= 0)));
+  if (!geBase) return false;
+
+  // upper bound depends on the left-most non-zero component of the caret base
+  if (cMaj > 0) return vMaj === cMaj;
+  if (cMin > 0) return vMaj === 0 && vMin === cMin;
+  return vMaj === 0 && vMin === 0 && vPat === cPat;
+}
+
+describe('the vinext toolchain install satisfies every vinext peer', () => {
+  it('pins vinext at the version these peer ranges were read from', () => {
+    // If vinext bumps, the hardcoded VINEXT_PEER_RANGES may be stale — force a
+    // re-read rather than silently validating pins against an old range set.
+    expect(
+      pinnedVersion('vinext'),
+      `VINEXT_VERSION in ${DEPLOY_SCRIPT} != ${PEER_VINEXT_VERSION}: re-run ` +
+        '`npm view vinext@<v> peerDependencies` and update VINEXT_PEER_RANGES',
+    ).toBe(PEER_VINEXT_VERSION);
+  });
+
+  it('pins every vinext peer it installs at a version satisfying vinext’s range', () => {
+    for (const [pkg, range] of Object.entries(VINEXT_PEER_RANGES)) {
+      const version = pinnedVersion(pkg);
+      expect(version, `${pkg} is not pinned in the toolchain install`).toBeDefined();
+      expect(
+        caretSatisfies(version as string, range),
+        `${pkg}@${version} does NOT satisfy vinext-beta.8's peer ${pkg}@"${range}" — ` +
+          'npm ERESOLVE will abort every fixture install before it can build',
+      ).toBe(true);
+    }
+  });
+
+  it('pins react and react-dom in the toolchain install (not left transitive)', () => {
+    expect(
+      pinnedVersion('react'),
+      'react is unpinned — the corpus fixture pulls react@19.2.4 via next@16.2, ' +
+        'which does not satisfy vinext-beta.8’s react@^19.2.6 peer',
+    ).toBeDefined();
+    expect(
+      pinnedVersion('react-dom'),
+      'react-dom is unpinned — the same ERESOLVE that kills the react peer kills react-dom',
+    ).toBeDefined();
+  });
+
+  it('keeps the whole React family coherent at one version', () => {
+    // A pin that leaves react and react-dom on DIFFERENT versions, or off the
+    // version the RSC transform was built against, reintroduces the skew a plain
+    // --legacy-peer-deps would. Assert all three move together.
+    const rsd = pinnedVersion('react-server-dom-webpack');
+    expect(pinnedVersion('react')).toEqual(rsd);
+    expect(pinnedVersion('react-dom')).toEqual(rsd);
+  });
+
+  it('does not fall back to --legacy-peer-deps/--force to mask a skew', () => {
+    // Either flag would make an ERESOLVE go away while leaving the real version
+    // skew in place — an honesty regression for a lane whose point is an honest
+    // number. If a future change adopts one, this test says so loudly.
+    const install = toolchainInstall();
+    expect(install).not.toContain('--legacy-peer-deps');
+    expect(install).not.toContain('--force');
+  });
+
+  it('sanity: the caret-satisfaction helper is not vacuously true', () => {
+    // Guards the guard — if caretSatisfies always returned true the peer check
+    // above would be decoration.
+    expect(caretSatisfies('0.5.34', '^0.5.34')).toBe(true);
+    expect(caretSatisfies('0.5.40', '^0.5.34')).toBe(true);
+    expect(caretSatisfies('0.5.26', '^0.5.34')).toBe(false);
+    expect(caretSatisfies('0.6.0', '^0.5.34')).toBe(false);
+    expect(caretSatisfies('19.2.6', '^19.2.6')).toBe(true);
+    expect(caretSatisfies('19.2.4', '^19.2.6')).toBe(false);
+    expect(caretSatisfies('20.0.0', '^19.2.6')).toBe(false);
+    expect(caretSatisfies('8.2.2', '^8.0.0')).toBe(true);
+  });
+});

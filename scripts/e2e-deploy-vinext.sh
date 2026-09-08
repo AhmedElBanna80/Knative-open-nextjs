@@ -83,17 +83,33 @@ fi
 VINEXT_VERSION="${KNEXT_VINEXT_VERSION:-1.0.0-beta.8}"
 VITE_VERSION="${KNEXT_VITE_VERSION:-8.2.2}"
 NITRO_VERSION="${KNEXT_NITRO_VERSION:-3.0.260610-beta}"
-PLUGIN_RSC_VERSION="${KNEXT_PLUGIN_RSC_VERSION:-0.5.26}"
-RSD_WEBPACK_VERSION="${KNEXT_RSD_WEBPACK_VERSION:-19.2.6}"
+# vinext@1.0.0-beta.8 declares `@vitejs/plugin-rsc@^0.5.34` as an (optional) peer.
+# Because the toolchain install pulls this package explicitly, npm enforces that
+# range even though the peer is optional — 0.5.26 does NOT satisfy `^0.5.34`, so
+# every fixture install still aborts with `npm ERESOLVE` (a SECOND conflict edge
+# that only surfaces after the react-family pin is fixed, since npm reports one
+# edge at a time). Pinned at 0.5.34 the whole toolchain install resolves cleanly.
+PLUGIN_RSC_VERSION="${KNEXT_PLUGIN_RSC_VERSION:-0.5.34}"
+# The React family (react, react-dom, react-server-dom-webpack) is versioned in
+# lockstep upstream and MUST be pinned together here. vinext@1.0.0-beta.8 declares
+# a `react@^19.2.6` peer; the corpus fixtures otherwise pull react@19.2.4
+# transitively via next@16.2, which does NOT satisfy that peer — every fixture
+# install then aborts with `npm ERESOLVE` before it can build, reddening the whole
+# axis for a reason that has nothing to do with the compiled artifact. Pinning the
+# whole family at the version vinext's RSC transform was built against keeps the
+# runtime coherent, which `--legacy-peer-deps` (accept-and-skew) would not.
+REACT_VERSION="${KNEXT_REACT_VERSION:-19.2.6}"
 
-log "installing knext tarballs + the pinned vinext toolchain (vinext@${VINEXT_VERSION}, vite@${VITE_VERSION}, nitro@${NITRO_VERSION})"
+log "installing knext tarballs + the pinned vinext toolchain (vinext@${VINEXT_VERSION}, vite@${VITE_VERSION}, nitro@${NITRO_VERSION}, react@${REACT_VERSION})"
 npm install --no-audit --no-fund --loglevel=error \
   "${LIB_TGZ}" "${DB_TGZ}" "${CORE_TGZ}" \
   "vinext@${VINEXT_VERSION}" \
   "vite@${VITE_VERSION}" \
   "nitro@${NITRO_VERSION}" \
   "@vitejs/plugin-rsc@${PLUGIN_RSC_VERSION}" \
-  "react-server-dom-webpack@${RSD_WEBPACK_VERSION}" >&2
+  "react@${REACT_VERSION}" \
+  "react-dom@${REACT_VERSION}" \
+  "react-server-dom-webpack@${REACT_VERSION}" >&2
 
 # ── 3. the vite config vinext builds through ──────────────────────────────────
 # Written only when the fixture has none: a fixture that ships its own vite
