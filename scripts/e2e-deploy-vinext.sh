@@ -143,6 +143,36 @@ VITECONFIG
   log "wrote ${VITE_CONFIG} (vinext + nitro bun preset)"
 fi
 
+# ── 3b. normalize the fixture to knext-vinext's ESM app contract ──────────────
+# knext's scaffolder writes `"type":"module"` into the package.json of EVERY app
+# it generates (templates/app/package.json.hbs), and the vinext production build
+# assumes ESM: without it, vite's rsc↔ssr module graph fails with UNRESOLVED_IMPORT
+# on App-Router fixtures (verified by cross-flip on the real corpus). ESM is thus
+# knext-vinext's de-facto app contract. The official corpus fixtures are CommonJS,
+# so we merge `"type":"module"` into the fixture's package.json here — the SAME
+# class of normalization as writing the per-fixture vite.config.mjs above, and
+# nothing beyond it.
+#
+# This is normalization-to-contract, NOT softening: it MERGES one key (preserving
+# the fixture's deps/scripts/everything else) and touches no fixture source or
+# tests. A CommonJS-app limitation is tracked separately, and this axis's compat
+# claim is scoped to ESM apps (see docs/compat-matrix.md, the vinext row).
+FIXTURE_PKG="${APP_DIR}/package.json"
+if [ -f "${FIXTURE_PKG}" ]; then
+  node -e '
+    const fs = require("node:fs");
+    const p = process.argv[1];
+    const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+    if (pkg.type !== "module") {
+      pkg.type = "module";
+      fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
+    }
+  ' "${FIXTURE_PKG}"
+  log "normalized ${FIXTURE_PKG} to \"type\":\"module\" (knext-vinext ESM app contract)"
+else
+  log "no package.json in fixture — skipping ESM normalization"
+fi
+
 # The deployment identity the harness's skew/asset tests key on. Generated
 # BEFORE the build so the build and the runtime agree.
 DEPLOYMENT_ID="${NEXT_DEPLOYMENT_ID:-knext-vinext-$(date +%s)-$$}"

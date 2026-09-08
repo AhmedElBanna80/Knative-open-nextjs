@@ -218,6 +218,62 @@ describe('the lane measures the COMPILED BINARY, not the uncompiled nitro output
   });
 });
 
+describe('fixture normalization is EXPLICIT and bounded to the ESM app contract — not softening', () => {
+  // The lane's honesty rests on measuring the fixture, changed only in the ways
+  // a knext-vinext user's own app is already shaped. Two normalizations are
+  // legitimate and NO MORE:
+  //   (a) the per-fixture `vite.config.mjs` injection (already asserted above), and
+  //   (b) merging `"type":"module"` into the fixture's package.json — knext's
+  //       scaffolder writes it into every generated app (package.json.hbs) and the
+  //       vinext build assumes ESM, so this is normalization-to-contract, the SAME
+  //       class as (a). It is NOT softening: a CommonJS-app limitation is a tracked,
+  //       separate gap and this axis's compat claim is scoped to ESM apps.
+  // Anything BROADER — deleting failing test/spec files, rewriting fixture source,
+  // narrowing the manifest — is softening the number, and must red here.
+  const script = () => read(DEPLOY_SCRIPT);
+  const executable = () =>
+    script()
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+
+  it('MERGES `type:module` into the fixture package.json, in CODE and not only in prose', () => {
+    // Comments are stripped first: an earlier sibling guard here stayed green
+    // against a mutation because the header comment still named the thing the
+    // code no longer did. Assert the mutation is a real, executed statement.
+    const lines = script()
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'));
+    const setsType = lines.filter((l) => /pkg\.type\s*=\s*["']module["']/.test(l));
+    expect(setsType.length, 'the harness must set pkg.type="module" on the fixture').toBe(1);
+  });
+
+  it('MERGES rather than overwrites — it reads the fixture package.json before writing it', () => {
+    // A merge preserves the fixture's own deps/scripts/everything else and changes
+    // one key; an overwrite would test a different app. The read-before-write is
+    // what makes it a merge.
+    const e = executable();
+    expect(e).toMatch(/readFileSync\([^)]*"utf8"\)/);
+    expect(e).toContain('JSON.parse(');
+    expect(e).toMatch(/writeFileSync\(/);
+  });
+
+  it('does NOT delete or rewrite fixture tests or source to force a pass', () => {
+    // The only fixture mutations permitted are (a) vite.config.mjs and (b) the
+    // type:module merge. Deleting a failing test file, or rewriting fixture
+    // source, inflates the number by removing what it measures — the exact
+    // softening the red-on-fail contract forbids. Scan for the shapes that do it.
+    const e = executable();
+    expect(e, 'no rm of .test/.spec files in the fixture').not.toMatch(
+      /\brm\b[^\n]*\.(test|spec)\b/,
+    );
+    expect(e, 'no blanket removal of a fixture test/ directory').not.toMatch(
+      /\brm\b[^\n]*(?:\btest\b|__tests__)\//,
+    );
+    expect(e, 'no find … -delete sweep over the fixture').not.toMatch(/\bfind\b[^\n]*-delete\b/);
+  });
+});
+
 describe('the packed @getknext/core preflight verifies the compile script — and does so SIGPIPE-safely', () => {
   // Run 33965643199 (the vinext lane's first firing PAST the pnpm→bun fix) died
   // at "Preflight — the packed @getknext/core ships the compile script" reporting

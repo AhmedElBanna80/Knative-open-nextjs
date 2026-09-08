@@ -50,6 +50,26 @@ are refused rather than silently producing a binary that boots roughly twice as 
 with `bun upgrade`.
 </Callout>
 
+## Your app must be an ES module
+
+The compiled build requires your app to be an **ES module** — your `package.json` must set:
+
+```json title="package.json"
+{
+  "type": "module"
+}
+```
+
+`kn-next create` sets this for you, so a freshly scaffolded app already satisfies it and you never
+have to think about it. The requirement matters only when you point the compiled build at an
+**existing** Next.js app that was written as CommonJS: add `"type": "module"` to its `package.json`
+before you build. Without it, the build fails while wiring up React Server Components — the
+server/client module graph cannot be resolved — rather than producing a broken binary.
+
+If your project still contains CommonJS files that rely on `require()` or a `.js` extension meaning
+CommonJS, rename them to `.cjs` (or convert them to `import`/`export`) so they keep working under
+`"type": "module"`.
+
 ## Image optimization is included
 
 The compiled binary cannot load native modules from inside itself, so knext ships the image codec
