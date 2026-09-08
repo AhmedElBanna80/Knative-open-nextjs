@@ -263,6 +263,10 @@ describe('fixture normalization is EXPLICIT and bounded to the ESM app contract 
     // type:module merge. Deleting a failing test file, or rewriting fixture
     // source, inflates the number by removing what it measures — the exact
     // softening the red-on-fail contract forbids. Scan for the shapes that do it.
+    // The scan is broadened past the two verbs it first knew (`rm`,
+    // `find … -delete`): a deletion has more shapes than those two, and #1032's
+    // code review named three the enumeration missed — `unlink(Sync)`, a `: >`
+    // truncate-to-empty, and `git rm`. Each removes what the lane measures.
     const e = executable();
     expect(e, 'no rm of .test/.spec files in the fixture').not.toMatch(
       /\brm\b[^\n]*\.(test|spec)\b/,
@@ -271,6 +275,47 @@ describe('fixture normalization is EXPLICIT and bounded to the ESM app contract 
       /\brm\b[^\n]*(?:\btest\b|__tests__)\//,
     );
     expect(e, 'no find … -delete sweep over the fixture').not.toMatch(/\bfind\b[^\n]*-delete\b/);
+    expect(e, 'no unlink(Sync) of .test/.spec files').not.toMatch(
+      /\bunlink(?:Sync)?\b[^\n]*\.(test|spec)\b/,
+    );
+    expect(e, 'no `: >` truncate-to-empty of a .test/.spec file').not.toMatch(
+      /:\s*>\s*[^\n]*\.(test|spec)\b/,
+    );
+    expect(e, 'no git rm of .test/.spec files').not.toMatch(/\bgit\s+rm\b[^\n]*\.(test|spec)\b/);
+  });
+
+  it('LIMITS per-fixture edits to the closed allowlist — a novel source rewrite or manifest narrowing reds', () => {
+    // Denylist → closed allowlist (#1032 sysdesign non-blocking #2). The two
+    // legitimate normalizations are asserted positively above; here we assert
+    // NOTHING ELSE edits the fixture in place. The sibling scan enumerates the
+    // deletion SHAPES it knows — but a novel rewrite it never listed (a `sed -i`
+    // over a .tsx, a SECOND `node -e` writeFileSync into fixture source, a line
+    // that narrows the shared corpus manifest) would slip straight through an
+    // enumeration. Close the set rather than keep extending the denylist.
+    const e = executable();
+
+    // (1) EXACTLY ONE writeFileSync — the type:module merge. A second one is the
+    // most direct way to rewrite a fixture source file from node, and the
+    // positive guard above (presence, not count) cannot see it.
+    const writes = e.match(/writeFileSync\(/g) ?? [];
+    expect(writes.length, 'the only writeFileSync is the type:module merge').toBe(1);
+
+    // (2) No in-place stream editor. None is needed by this script; each is a
+    // fixture-source rewrite in disguise.
+    expect(e, 'no sed -i in-place edit').not.toMatch(/\bsed\b[^\n]*\s-[a-zA-Z]*i\b/);
+    expect(e, 'no perl -i in-place edit').not.toMatch(/\bperl\b[^\n]*\s-[a-zA-Z]*i\b/);
+    expect(e, 'no awk -i in-place edit').not.toMatch(/\bawk\b[^\n]*-i\b/);
+
+    // (3) No shell redirection into a fixture SOURCE file. The only redirects
+    // this script makes are into knext artifacts (`.log`) and the one `.mjs`
+    // vite config (asserted above); `> src/x.tsx` is a source rewrite.
+    expect(e, 'no shell redirect into a fixture .ts/.tsx/.js/.jsx/.cjs source').not.toMatch(
+      />>?\s*"?[^"\n;|&<>\s]*\.(tsx?|jsx?|cjs)\b/,
+    );
+
+    // (4) The deploy script must NOT touch the shared corpus manifest — narrowing
+    // it here would inflate the number while still looking like the node lane's.
+    expect(e, 'the deploy script never references the corpus manifest').not.toMatch(/manifest/i);
   });
 });
 
