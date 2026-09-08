@@ -57,6 +57,13 @@ spec:
       imagePullSecrets:
         - name: ocir-pull
       serviceAccountName: pggw
+      # Graceful drain on SIGTERM (issue #1016): the gateway waits for in-flight
+      # proxied Postgres sessions to finish (bounded by GW_DRAIN_DEADLINE_MS,
+      # default 25000) before exiting, so a rolling redeploy / scale-down does not
+      # reset live queries. This grace period must exceed GW_DRAIN_DEADLINE_MS/1000
+      # plus the ~3s metrics-server shutdown, so the kubelet's SIGKILL never
+      # pre-empts an in-progress drain.
+      terminationGracePeriodSeconds: 35
       containers:
         - name: gateway
           image: me-abudhabi-1.ocir.io/axfqznklsd2t/ks-pg/gateway:v0.6.1@sha256:12a735337adcd2470fe834557ad7ab298d20a35e2113b80669211324f28a0ccb # OCIR, digest-pinned (issue #56); v0.6.0 RELEASE build (issues #78/#82) — supersedes iter9-ro-ef543a5; includes the RO-pool lane (#66) + branch-per-app (#6)
@@ -91,6 +98,8 @@ spec:
               value: "60000" # RO pool idle window; set 0 if an HPA owns compute-ro (deploy/27 posture B)
             - name: GW_IDLE_MS
               value: "60000" # demo-friendly idle window; production: 300000+
+            - name: GW_DRAIN_DEADLINE_MS
+              value: "25000" # SIGTERM: wait this long for in-flight sessions to finish before force-close (issue #1016). Keep < terminationGracePeriodSeconds*1000 above.
             - name: GW_WAKE_TIMEOUT_MS
               value: "120000" # first wake on a cluster may pull the compute image
             - name: GW_RETRY_MS

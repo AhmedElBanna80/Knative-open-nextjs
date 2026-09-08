@@ -110,6 +110,23 @@ type Gateway struct {
 	mu     sync.Mutex
 	active map[string]*activeEntry
 	closed bool
+
+	// wg tracks live proxy sessions (the two io.Copy pipe goroutines per
+	// connection count as one unit): Add(1) when piping starts, Done() in the
+	// once-guarded cleanup. Drain waits on it so an in-flight Postgres session
+	// is allowed to finish on SIGTERM instead of being reset (issue #1016).
+	wg sync.WaitGroup
+	// live holds the client+compute conns of every session currently piping,
+	// so Drain can force-close whatever is left when its deadline expires.
+	live    map[uint64]*liveConn
+	liveSeq uint64
+}
+
+// liveConn is one in-flight proxied session's conn pair, force-closed by Drain
+// when the drain deadline expires.
+type liveConn struct {
+	client net.Conn
+	conn   net.Conn
 }
 
 // New builds a Gateway from injected env config.
@@ -274,7 +291,9 @@ func (g *Gateway) Serve(ln net.Listener) {
 	}
 }
 
-// Close marks the gateway closed (idle timers stop scheduling new sleeps).
+// Close marks the gateway closed (idle timers stop scheduling new sleeps). It is
+// the immediate, non-blocking stop; use Drain for a graceful, bounded shutdown
+// that lets in-flight sessions finish.
 func (g *Gateway) Close() error {
 	g.mu.Lock()
 	g.closed = true
@@ -286,6 +305,67 @@ func (g *Gateway) Close() error {
 	}
 	g.mu.Unlock()
 	return nil
+}
+
+// Drain performs a graceful, bounded shutdown mirroring the app runtime's
+// gracefulShutdown contract (packages/kn-next/src/adapters/shutdown.ts): stop
+// scheduling sleeps, then wait for every in-flight proxied session to finish so
+// no in-flight Postgres query/transaction/COPY/replication stream is reset on
+// SIGTERM. The wait is bounded by ctx; when it expires the remaining sessions'
+// client+compute conns are force-closed so the process exits within the pod's
+// terminationGracePeriodSeconds instead of hanging. Safe to call with zero
+// in-flight connections (returns nil immediately). The caller closes the
+// listener first so no NEW connections are accepted while Drain runs (issue
+// #1016).
+func (g *Gateway) Drain(ctx context.Context) error {
+	_ = g.Close() // mark closed, stop pending idle timers
+
+	done := make(chan struct{})
+	go func() {
+		g.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		// Deadline hit: force-close whatever is still piping so the io.Copy
+		// goroutines unblock, run their cleanup, and the process can exit.
+		g.mu.Lock()
+		conns := make([]*liveConn, 0, len(g.live))
+		for _, lc := range g.live {
+			conns = append(conns, lc)
+		}
+		g.mu.Unlock()
+		for _, lc := range conns {
+			_ = lc.client.Close()
+			_ = lc.conn.Close()
+		}
+		g.wg.Wait() // pipes now unblock; cleanup runs wg.Done for each
+		return ctx.Err()
+	}
+}
+
+// registerLive records an in-flight session's conn pair for force-close on a
+// drain-deadline, returning the id used to remove it on cleanup.
+func (g *Gateway) registerLive(client, conn net.Conn) uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.live == nil {
+		g.live = map[uint64]*liveConn{}
+	}
+	g.liveSeq++
+	id := g.liveSeq
+	g.live[id] = &liveConn{client: client, conn: conn}
+	return id
+}
+
+// unregisterLive removes a session from the live set once its pipes have closed.
+func (g *Gateway) unregisterLive(id uint64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.live, id)
 }
 
 // handle reads the initial packet(s), declines SSL/GSS, then proxies a startup.
@@ -597,13 +677,20 @@ func (g *Gateway) proxy(client net.Conn, startupPacket, pendingRest []byte, targ
 		_, _ = conn.Write(pendingRest)
 	}
 
+	// Track this live session for graceful drain (issue #1016): wg.Add here pairs
+	// with the single wg.Done in the once-guarded cleanup, and the conn pair is
+	// registered so Drain can force-close it if the drain deadline expires.
+	g.wg.Add(1)
+	liveID := g.registerLive(client, conn)
 	var once sync.Once
 	cleanup := func() {
 		once.Do(func() {
 			g.metrics.ConnClose(target.Key)
 			g.connEnded(target, replication)
+			g.unregisterLive(liveID)
 			_ = client.Close()
 			_ = conn.Close()
+			g.wg.Done()
 		})
 	}
 	go func() { _, _ = io.Copy(conn, client); cleanup() }()
