@@ -67,6 +67,7 @@ interface Job {
   if?: string;
   steps?: Step[];
   strategy?: { matrix?: { shard?: string[] } };
+  env?: Record<string, string>;
   'continue-on-error'?: unknown;
 }
 interface Workflow {
@@ -82,6 +83,37 @@ function parse(rel: string): Workflow {
 
 const steps = (wf: Workflow): Step[] =>
   Object.values(wf.jobs ?? {}).flatMap((job) => job.steps ?? []);
+
+/**
+ * Every value `KNEXT_COMPILE` is bound to anywhere in the workflow — workflow
+ * env, job env, step env, and step `with:`. The deploy script's default is
+ * COMPILED; `KNEXT_COMPILE=0` is the diagnostic uncompiled-boot toggle, and the
+ * lane must never carry it, or it would publish an ADR-0048-prohibited number
+ * (a compat figure measured on an artifact no user runs) with every other guard
+ * green. Collect across ALL scopes rather than one, so a leak in any of them
+ * reds this.
+ */
+function knextCompileBindings(wf: Workflow): unknown[] {
+  const out: unknown[] = [];
+  const push = (v: unknown) => {
+    if (v !== undefined) out.push(v);
+  };
+  push(wf.env?.KNEXT_COMPILE);
+  for (const job of Object.values(wf.jobs ?? {})) {
+    push(job.env?.KNEXT_COMPILE);
+    for (const step of job.steps ?? []) {
+      push(step.env?.KNEXT_COMPILE);
+      push(step.with?.KNEXT_COMPILE);
+    }
+  }
+  return out;
+}
+
+/** Does a YAML scalar read as the uncompiled/off value the lane must never set? */
+function isUncompiledValue(v: unknown): boolean {
+  const s = String(v).trim().toLowerCase();
+  return s === '0' || s === '' || s === 'false' || s === 'no' || s === 'off';
+}
 
 /**
  * The shard job's `Run …` step — the one that invokes the official harness.
@@ -251,6 +283,36 @@ describe('the lane measures the COMPILED BINARY, not the uncompiled nitro output
       'booting the uncompiled entry publishes a number about an artifact no user runs ' +
         '(the compiled binary dlopens sharp from a real path and re-derives its asset root)',
     ).toEqual([]);
+  });
+
+  it('never sets KNEXT_COMPILE=0 (or any off value) — the lane runs the COMPILED default', () => {
+    // The script's `KNEXT_COMPILE=0` toggle boots the uncompiled nitro entry
+    // (`exec bun "${NITRO_ENTRY}"`), which evades the literal `.output/server`
+    // guard above by naming a variable instead of the path. The only remaining
+    // way to flip the lane onto that path is a `KNEXT_COMPILE: '0'` in the
+    // workflow env — job, step, or `with`. Scan EVERY scope: the default is
+    // compiled, so ABSENT is fine; PRESENT-but-off is the prohibited state.
+    const bindings = knextCompileBindings(parse(LANE));
+    const off = bindings.filter(isUncompiledValue);
+    expect(
+      off,
+      'the vinext lane sets KNEXT_COMPILE to an uncompiled/off value — it would publish ' +
+        'an ADR-0048-prohibited compat number measured on the uncompiled artifact',
+    ).toEqual([]);
+  });
+
+  it('the KNEXT_COMPILE scan actually catches a leaked off value (mutation proof)', () => {
+    // Inject the exact leak the assertion above guards against, into a PARSED
+    // fixture, and prove the scan reds. A guard a mutation survives is
+    // decoration; this executes the same collector on a mutated workflow.
+    const wf = parse(LANE);
+    const firstJob = Object.values(wf.jobs ?? {})[0];
+    expect(firstJob, 'the lane must have at least one job to mutate').toBeDefined();
+    (firstJob as Job).env = { ...(firstJob?.env ?? {}), KNEXT_COMPILE: '0' };
+    const off = knextCompileBindings(wf).filter(isUncompiledValue);
+    expect(off).toContain('0');
+    // And the real, un-mutated workflow is clean — the mutation is what reds it.
+    expect(knextCompileBindings(parse(LANE)).filter(isUncompiledValue)).toEqual([]);
   });
 });
 
