@@ -1,6 +1,6 @@
 # ADR-0001 (scale-zero-pg): Dated exception for gateway↔compute plaintext transport and the unauthenticated peer idle-scrape
 
-- Status: Proposed (awaiting platform-owner + architect sign-off — this ADR *records an accepted risk*; accepting it is a human decision, not the agent's)
+- Status: Accepted (platform-owner/founder, 2026-09-08 — the architect sprint-8 close gate had already required this dated exception exist)
 - Date: 2026-09-08
 - Scope: `packages/scale-zero-pg/` (the scale-to-zero PostgreSQL wake-on-connect gateway). Module-local ADR — does not amend any main-repo ADR.
 - Expiry: this exception lapses at **scale-zero-pg GA / first external-tenant use, whichever comes first** — at which point both gaps must be closed or re-justified, not silently carried.
@@ -68,8 +68,7 @@ DBaaS hardening), NOT a judgment that mTLS/auth are unnecessary — they are owe
 
 ## Action items
 
-- [ ] **Founder/architect: accept or reject** this exception (flip Status → Accepted/Rejected). Until
-      then it is Proposed and the risk is *documented but not formally accepted*.
+- [x] **Founder accepted** this exception 2026-09-08 (Status → Accepted). Risk is now formally accepted, dated, and expiry-bound.
 - [ ] File tracking issues for F5 (gateway→compute mTLS) and F6 (peer-scrape auth) tagged to the
       expiry milestone, so closure is scheduled, not incidental.
 - [ ] At GA / first external-tenant use: re-review this ADR; close F5+F6 or re-justify.
