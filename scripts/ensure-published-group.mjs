@@ -22,16 +22,24 @@
  * --------------
  * Recover the partial WITHIN the run so it can never leave a broken `@latest`.
  * For every fixed-group member NOT yet resolvable on the registry at the target
- * version, re-publish JUST that member's already-built + workspace-rewritten
+ * version, publish JUST that member's already-built + workspace-rewritten
  * tarball (the same package dir `changeset publish` published, so its manifest
  * already carries `^<version>` sibling ranges from
  * scripts/rewrite-workspace-ranges.mjs — never a `workspace:` spec), with
- * bounded retries + backoff for read-after-write lag. It re-publishes ONLY the
- * missing members: a member already on the registry at the target is skipped,
- * because re-publishing an existing version is an immutable-403, and a
- * missing-but-just-published member is lag to wait out, not to re-push. If the
- * group is still incoherent after the bounded retries, it FAILS CLOSED (exit 1),
- * and `verify-published-group.mjs --post` remains the final assertion after it.
+ * bounded retries + backoff for read-after-write lag.
+ *
+ * HEAL NEVER *DELIBERATELY* RE-PUBLISHES an existing version. But it can race
+ * read-after-write lag: a member the UPSTREAM `changeset publish` step already
+ * shipped may still be registry-invisible at round 0, so heal — which cannot
+ * tell "never published" from "published-but-not-yet-visible" — will attempt a
+ * publish and npm answers with a 403 "cannot publish over the previously
+ * published versions". That 403 is POSITIVE PROOF the member is on the registry:
+ * it is ABSORBED as proof-of-publication (marked published, never a failure,
+ * never a retry), and the normal resolve loop confirms it once lag clears. A 403
+ * for ANY OTHER reason (auth/forbidden) is a real error and still fails closed.
+ * A member already resolvable at the target is skipped outright. If the group is
+ * still incoherent after the bounded retries, it FAILS CLOSED (exit 1), and
+ * `verify-published-group.mjs --post` remains the final assertion after it.
  *
  * FAIL-CLOSED ON AN UNREACHABLE REGISTRY, mirroring publish-preflight.mjs and
  * verify-published-group.mjs: an unanswerable "is it published?" is never read
@@ -74,6 +82,24 @@ export function defaultBackoffMs(attempt) {
 export class GroupStillIncoherentError extends Error {}
 
 /**
+ * TRUE iff a FAILED publish was rejected because the version already exists —
+ * npm's immutable-version 403 (message "cannot publish over the previously
+ * published versions" / `EPUBLISHCONFLICT`). That rejection is positive proof
+ * the member IS on the registry (read-after-write lag from the upstream publish
+ * step), so heal absorbs it as published rather than a failure. ANY OTHER 403
+ * (auth/forbidden) returns FALSE and stays a real, fail-closed error.
+ */
+export function isAlreadyPublishedConflict(result) {
+  if (!result || result.ok) return false;
+  const text = String(result.stderr ?? result.message ?? '').toLowerCase();
+  return (
+    text.includes('cannot publish over') ||
+    text.includes('previously published version') ||
+    text.includes('epublishconflict')
+  );
+}
+
+/**
  * Re-publish every fixed-group member missing at the target version until the
  * whole group resolves, or fail closed. Pure — the registry reads, the publish
  * spawn and the sleep are all injected.
@@ -81,9 +107,14 @@ export class GroupStillIncoherentError extends Error {}
  * Contract:
  *   - THROWS `RegistryUnreachableError` if the probe fails at any check — an
  *     unreachable registry never certifies coherence.
- *   - Re-publishes a member AT MOST ONCE per run: once we have published it, a
- *     subsequent still-missing reading is read-after-write LAG (wait it out) —
- *     never a reason to re-publish (that would be an immutable-403).
+ *   - Publishes a member AT MOST ONCE per run: once we have published it (or
+ *     absorbed npm's already-published 403 for it), a subsequent still-missing
+ *     reading is read-after-write LAG (wait it out) — never a reason to publish
+ *     again (that would be a redundant immutable-403).
+ *   - Absorbs an already-published 403 (see `isAlreadyPublishedConflict`) as
+ *     proof-of-publication: heal never DELIBERATELY re-publishes, but a member
+ *     the upstream publish step shipped can still lag at round 0, and npm's
+ *     "cannot publish over" 403 proves it is on the registry — not a failure.
  *   - Never publishes a member already resolvable at the target (present member).
  *   - THROWS `GroupStillIncoherentError` if any member still does not resolve at
  *     the target after `maxAttempts` rounds.
@@ -128,11 +159,16 @@ export async function ensureGroupPublished({
       return { published: [...publishedThisRun], attempts: attempt + 1 };
     }
     for (const name of missing) {
-      // Already re-published this run but not yet resolvable → read-after-write
-      // lag. Do NOT re-publish (immutable-403); the backoff below waits it out.
+      // Already published this run but not yet resolvable → read-after-write
+      // lag. Do NOT publish again (immutable-403); the backoff below waits it out.
       if (publishedThisRun.has(name)) continue;
       const result = publish(name);
-      if (result?.ok) publishedThisRun.add(name);
+      // A benign already-published 403 (isAlreadyPublishedConflict) is the
+      // upstream publish step's lag surfacing: absorb it as proof-of-publication
+      // — mark published, never a failure, never a retry. A real failure (incl.
+      // a NON-benign 403 like auth) leaves it unpublished so a later round
+      // retries and, if it never lands, the run fails closed below.
+      if (result?.ok || isAlreadyPublishedConflict(result)) publishedThisRun.add(name);
     }
     await sleep(backoffMs(attempt));
   }
@@ -200,12 +236,18 @@ function npmProbe(registry) {
  * artifact `changeset publish` shipped, so a re-publish is byte-faithful.
  */
 function npmPublish(dir, registry) {
+  // stderr is PIPED (not inherited) so we can read npm's rejection message and
+  // tell a benign already-published 403 from a real failure — then re-emitted to
+  // our own stderr so the log still shows it. npm never echoes NODE_AUTH_TOKEN,
+  // and we add nothing that would, so this capture leaks no secret.
   const run = spawnSync(
     process.platform === 'win32' ? 'npm.cmd' : 'npm',
     ['publish', '--registry', registry],
-    { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'inherit', 'inherit'] },
+    { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'inherit', 'pipe'] },
   );
-  return { ok: !run.error && run.status === 0, stderr: run.stderr || '' };
+  const stderr = run.stderr || '';
+  if (stderr) process.stderr.write(stderr);
+  return { ok: !run.error && run.status === 0, stderr };
 }
 
 function die(message) {

@@ -112,6 +112,55 @@ describe('ensureGroupPublished — read-after-write lag', () => {
   });
 });
 
+describe('ensureGroupPublished — absorbs an already-published 403 as proof-of-publication', () => {
+  // The bug this covers: on the HAPPY path the upstream `changeset publish` step
+  // already shipped a member, but it is not yet registry-visible at round 0
+  // (read-after-write lag). It is NOT in publishedThisRun (heal never published
+  // it), so the loop calls publish() on an already-published, immutable version —
+  // npm returns a 403 "cannot publish over the previously published versions".
+  // That 403 is POSITIVE PROOF the member is on the registry: the healer must
+  // ABSORB it (treat as published, no failure, no re-hammer), and let the normal
+  // resolve loop confirm it once lag clears.
+  it('treats an npm "cannot publish over" 403 as published and does not re-publish that member', async () => {
+    // lib was shipped by upstream publish but lags; publishing it yields the
+    // benign 403. After the first (absorbed) publish attempt, lag clears and it
+    // resolves. Every other member resolves immediately.
+    const calls: string[] = [];
+    let libAttempted = false;
+    const result = await ensureGroupPublished({
+      members: MEMBERS,
+      targetVersion: TARGET,
+      probe: () => true,
+      resolves: (name: string, version: string) => {
+        if (version !== TARGET) return false;
+        if (name === '@getknext/lib') return libAttempted; // visible only after lag clears
+        return true;
+      },
+      publish: (name: string) => {
+        calls.push(name);
+        if (name === '@getknext/lib') {
+          libAttempted = true;
+          return {
+            ok: false,
+            stderr:
+              'npm error code E403\n' +
+              'npm error 403 403 Forbidden - PUT https://registry.npmjs.org/@getknext%2flib - ' +
+              'You cannot publish over the previously published versions: 0.5.0.',
+          };
+        }
+        return { ok: true, stderr: '' };
+      },
+      sleep: async () => {},
+      maxAttempts: 5,
+    });
+
+    // lib was attempted exactly once (absorbed, never re-hammered) and the run
+    // reports it as published — no throw.
+    expect(calls.filter((c) => c === '@getknext/lib').length).toBe(1);
+    expect(result.published).toContain('@getknext/lib');
+  });
+});
+
 describe('ensureGroupPublished — fail closed', () => {
   it('throws GroupStillIncoherentError when a member stays missing after max retries', async () => {
     const { publish } = publishSpy(() => false); // publish never succeeds
@@ -126,6 +175,42 @@ describe('ensureGroupPublished — fail closed', () => {
         maxAttempts: 3,
       }),
     ).rejects.toBeInstanceOf(GroupStillIncoherentError);
+  });
+
+  it('does NOT absorb a non-benign 403 (auth/forbidden) — keeps retrying and fails closed', async () => {
+    // A 403 that is NOT "cannot publish over an existing version" (e.g. auth) is
+    // a real failure: it must NOT be swallowed as proof-of-publication. A
+    // swallowed 403 would mark lib published and STOP retrying it after round 0;
+    // a real failure must be RE-ATTEMPTED every round. lib is genuinely missing
+    // and every publish is auth-rejected, so the run both keeps retrying lib AND
+    // fails closed rather than certifying a partial group.
+    const libCalls: string[] = [];
+    const maxAttempts = 3;
+    await expect(
+      ensureGroupPublished({
+        members: MEMBERS,
+        targetVersion: TARGET,
+        probe: () => true,
+        resolves: (name: string, version: string) => version === TARGET && name !== '@getknext/lib',
+        publish: (name: string) => {
+          if (name === '@getknext/lib') {
+            libCalls.push(name);
+            return {
+              ok: false,
+              stderr:
+                'npm error code E403\n' +
+                'npm error 403 403 Forbidden - PUT https://registry.npmjs.org/@getknext%2flib - ' +
+                'Forbidden: you do not have permission to publish "@getknext/lib". Are you logged in?',
+            };
+          }
+          return { ok: true, stderr: '' };
+        },
+        sleep: async () => {},
+        maxAttempts,
+      }),
+    ).rejects.toBeInstanceOf(GroupStillIncoherentError);
+    // Retried every round — NOT absorbed-and-skipped after the first attempt.
+    expect(libCalls.length).toBe(maxAttempts);
   });
 
   it('throws RegistryUnreachableError when the reachability probe fails (never certifies from an unreachable registry)', async () => {
