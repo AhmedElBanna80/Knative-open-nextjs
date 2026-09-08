@@ -302,6 +302,24 @@ The same gate also checks two subtler flavors of merged≠deployed:
   contract 27 fails CI if the annotation drifts from the ConfigMap, guaranteeing the roll
   is never forgotten.
 
+- **Prometheus config / scrape-job drift, LIVE (issue #792).** §E proves every shipped
+  *alert rule* is loaded, but it is blind to a **stale scrape config**: a live
+  `prometheus-config` ConfigMap once predated mid-July and lacked the `appdb-operator`
+  scrape job entirely, so `appdb_warm_hold_active` was **never scraped** and the
+  `ComputePhantomKeepalive` warm-hold subtraction silently ran on `or vector(0)` — the
+  worst class, silent alert blindness. The offline reload contract (`_validate.sh` contract
+  27) can only compare the *manifest's* hash to the *manifest's* annotation; it cannot see
+  the cluster, so a stale live ConfigMap / stale live annotation / a scrape job Prometheus
+  never learned passes every offline gate. §H feeds **live** cluster data into the
+  offline-tested drift logic (`deploy/promdrift.py`, `deploy/test_promdrift.py`) and fails
+  loud on any of: (1) the live ConfigMap content hash ≠ the tracked `60-prometheus.yaml`
+  content hash; (2) the live Prometheus Deployment `ks-pg.dev/prometheus-config-sha256`
+  annotation ≠ the tracked `./deploy/_validate.sh prom-config-hash`; (3) any tracked
+  `job_name` absent or unhealthy in the live `/api/v1/targets`. It is **fail-closed** — if
+  any live datum is unreachable (ConfigMap absent, annotation empty, targets API down) the
+  verdict is FAIL, never pass. Runs on every `sh deploy/_verify-drift.sh` against the OKE
+  plane; the logic alone is unit-tested cluster-free in CI.
+
 - **compute-files SCRAM content, LIVE (issues #160/#162).** §F asserts the shared
   `compute-files` ConfigMap on the cluster carries the md5→SCRAM migration verbatim:
   `config.json`'s `password_encryption=scram-sha-256`, the pg_hba catch-all rewrite to

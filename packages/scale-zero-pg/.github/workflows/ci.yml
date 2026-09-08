@@ -45,6 +45,22 @@ jobs:
       - name: skctl serializer round-trip + version-guard tests
         run: python3 -m unittest discover -s deploy -p 'test_skctl.py' -v
 
+  # promdrift.py is the OFFLINE drift-check LOGIC behind _verify-drift.sh §H: it
+  # compares the TRACKED prometheus config (60-prometheus.yaml hash + scrape jobs)
+  # against LIVE cluster data (ConfigMap hash, Deployment annotation, /api/v1/targets)
+  # so a stale deployed prometheus-config cannot hide (the 5-week-stale-config /
+  # appdb-operator-never-scraped incident — silent alert blindness). This job proves
+  # the three checks + fail-closed behaviour with fixtures. Stdlib only, no cluster;
+  # the LIVE half runs in the OKE verification battery, not here.
+  promdrift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: prometheus config/scrape drift-logic tests
+        run: python3 -m unittest discover -s deploy -p 'test_promdrift.py' -v
+
   # provision-app.sh app-name / reserved-name validation (issues #79/#74). No
   # cluster: validate_app_name runs before any kubectl call, so bad names fail
   # fast. Guards the tenant-boundary charset check against a locale-collation

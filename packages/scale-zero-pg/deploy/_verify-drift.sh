@@ -396,5 +396,61 @@ else
   ok "per-app durable SCRAM verifier sample SKIPPED — needs a compute wake; run '_verify-drift.sh --deep' (or DRIFT_DEEP=1) to enable (issue #162)"
 fi
 
+# H. PROMETHEUS CONFIG / SCRAPE-JOB DRIFT (issue #792). §E proves every shipped ALERT
+# RULE is loaded, but it is BLIND to a stale SCRAPE config: the live prometheus-config
+# ConfigMap once predated mid-July and LACKED the appdb-operator scrape job entirely, so
+# appdb_warm_hold_active was NEVER scraped and ComputePhantomKeepalive silently ran on
+# `or vector(0)` — the worst class, silent alert blindness. The offline reload contract
+# (_validate.sh contract 27) can only compare the MANIFEST's hash to the MANIFEST's
+# annotation; it cannot see the cluster, so a stale live ConfigMap / stale live annotation /
+# a scrape job Prometheus never learned passes every offline gate. This section feeds LIVE
+# cluster data into the offline-tested drift LOGIC (promdrift.py, test_promdrift.py) and
+# FAILS LOUD on: (1) live ConfigMap content hash != tracked prom-config-hash; (2) live
+# Deployment ks-pg.dev/prometheus-config-sha256 annotation != the same; (3) any tracked
+# scrape job_name absent or unhealthy in the live /api/v1/targets. FAIL-CLOSED: if any live
+# datum is unreachable the verdict is FAIL, never pass (a checker green when it cannot see
+# the plane is worse than none).
+H_TRACKED_HASH=$(./_validate.sh prom-config-hash 2>/dev/null | head -1 | tr -d '[:space:]')
+# tracked scrape job_name list — ONLY the `- job_name:` list items under scrape_configs
+# (anchored, so the `on(namespace, job_name)` PromQL label references are NOT matched).
+H_TRACKED_JOBS=$(grep -oE '^[[:space:]]*- job_name:[[:space:]]*[A-Za-z0-9_-]+' 60-prometheus.yaml | awk '{print $NF}' | sort -u)
+H_CM_JSON=$($K get configmap prometheus-config -o json 2>/dev/null || true)
+H_ANNOTATION=$($K get deploy prometheus -o jsonpath='{.spec.template.metadata.annotations.ks-pg\.dev/prometheus-config-sha256}' 2>/dev/null || true)
+H_TARGETS=$($K exec deploy/prometheus -- wget -qO- 'http://localhost:9090/api/v1/targets' 2>/dev/null || true)
+H_CMFILE=$(mktemp); H_TGFILE=$(mktemp)
+printf '%s' "$H_CM_JSON" > "$H_CMFILE"
+printf '%s' "$H_TARGETS" > "$H_TGFILE"
+H_TRACKED_HASH="$H_TRACKED_HASH" H_TRACKED_JOBS="$H_TRACKED_JOBS" \
+H_ANNOTATION="$H_ANNOTATION" H_CMFILE="$H_CMFILE" H_TGFILE="$H_TGFILE" \
+python3 - <<'PY'
+import importlib.util, json, os, sys
+here = os.getcwd()
+spec = importlib.util.spec_from_file_location("promdrift", os.path.join(here, "promdrift.py"))
+promdrift = importlib.util.module_from_spec(spec); spec.loader.exec_module(promdrift)
+def load_json(path):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+cm = load_json(os.environ["H_CMFILE"])
+cm_data = cm.get("data") if isinstance(cm, dict) else None   # None -> fail-closed
+targets = load_json(os.environ["H_TGFILE"])                  # None -> fail-closed
+jobs = [j for j in os.environ.get("H_TRACKED_JOBS", "").split("\n") if j.strip()]
+tracked_cm = promdrift.extract_manifest_cm_data(os.path.join(here, "60-prometheus.yaml"))
+obj = {
+    "tracked_cm_data": tracked_cm,
+    "tracked_annotation": os.environ.get("H_TRACKED_HASH", ""),
+    "tracked_jobs": jobs,
+    "live_cm_data": cm_data,
+    "live_annotation": os.environ.get("H_ANNOTATION", ""),
+    "targets": targets,
+}
+sys.exit(promdrift.run_cli_from_obj(obj))
+PY
+H_RC=$?
+rm -f "$H_CMFILE" "$H_TGFILE"
+[ "$H_RC" -eq 0 ] || fail "prometheus config/scrape drift detected (live observability plane diverges from the tracked 60-prometheus.yaml — merged scrape/rule changes are DARK) — see PROMDRIFT lines above (issue #792)"
+
 if [ "$DEEP" = "1" ]; then DSUM=" AND sampled per-app durable SCRAM verifiers are SCRAM-SHA-256 (issue #162)"; else DSUM=""; fi
-echo "drift verification: TARGET CLUSTER identity asserted (OKE, not orbstack/kind — issue #157) AND live pods match the manifest contract AND every declared workload is deployed and healthy AND runs the pinned image digest AND the zone axis (CRD + operator) is live-present AND every shipped Prometheus alert rule is loaded AND the compute-files SCRAM migration is live${DSUM} (issues #151/#155/#157/#160/#162)"
+echo "drift verification: TARGET CLUSTER identity asserted (OKE, not orbstack/kind — issue #157) AND live pods match the manifest contract AND every declared workload is deployed and healthy AND runs the pinned image digest AND the zone axis (CRD + operator) is live-present AND every shipped Prometheus alert rule is loaded AND the prometheus scrape config + jobs match the tracked config (issue #792) AND the compute-files SCRAM migration is live${DSUM} (issues #151/#155/#157/#160/#162/#792)"
