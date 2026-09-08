@@ -680,9 +680,25 @@ jobs:
         # always emits the ledger artifact. The JOB still fails honestly — on the
         # shard's own summary, in the fail-on-red gate below. Both halves, or this
         # is a silent green.
+        #
+        # `--retries 0` is the shard-COMPLETENESS lever, NOT a softening. It is
+        # upstream's own first-class flag (run-tests.js `.number('retries')`,
+        # default 2 = 3 attempts; `--retries 0` = 1 attempt) — no env override
+        # exists, this IS the supported knob. High-case-count fixtures that FAIL
+        # deterministically on this axis (the compiled binary boots but never
+        # serves the route, so every case hits the harness's hardcoded 60 s
+        # per-case timeout) were retried 3× per file: a single 32-case fixture at
+        # 32 × 60 s × 3 ≈ 96 min could exceed the shard cap and TRUNCATE its shard,
+        # losing the number entirely (complete=false). One attempt cuts that to
+        # ~32 min so every shard banks a COMPLETE result. This changes no
+        # deterministic verdict — a fixture failing all 3 attempts already fails on
+        # attempt 1, a passing one already passes on attempt 1 — and can only push
+        # the axis MORE red (a genuinely-flaky pass-on-retry now books as fail),
+        # never softer. The fail-on-red gate below is untouched: no
+        # continue-on-error, no skip, no manifest narrowing.
         timeout-minutes: 105
         run: |
-          node run-tests.js --type e2e -c 2 -g ${{ matrix.shard }} 2>&1 | tee runner.log || true
+          node run-tests.js --type e2e --retries 0 -c 2 -g ${{ matrix.shard }} 2>&1 | tee runner.log || true
 
       - name: Compute excluded count from manifest
         if: always()

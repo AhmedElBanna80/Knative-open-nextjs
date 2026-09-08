@@ -179,6 +179,42 @@ describe('the lane is red-on-fail — no skip, no swallow', () => {
   });
 });
 
+describe('the harness runs with the retry multiplier cut, for shard completeness', () => {
+  // WHY this is a guarded value, not an incidental flag: high-case-count fixtures
+  // that FAIL deterministically on the vinext axis (the binary boots but never
+  // serves the route, so every case burns the harness's hardcoded 60 s per-case
+  // timeout) were retried 3× per file under upstream's default `retries: 2`. A
+  // single ~32-case fixture at 32 × 60 s × 3 ≈ 96 min could exceed the shard cap
+  // and TRUNCATE the shard, losing its number (complete=false). `--retries 0`
+  // (upstream's first-class `.number('retries')` flag) drops that to one attempt
+  // so every shard banks a COMPLETE result.
+  //
+  // This is verdict-neutral in the safe direction: a deterministic failure fails
+  // on attempt 1 regardless, so no red becomes green — the only movement is that a
+  // genuinely-flaky pass-on-retry now books as fail, pushing the axis MORE red,
+  // never softer. So it does NOT touch the red-on-fail contract (guarded above).
+  it('passes --retries 0 to run-tests.js (locks the value; a bump back to the default re-truncates shards)', () => {
+    const run = harnessStep(parse(LANE)).run ?? '';
+    // The exact token, not just "--retries": `--retries 2` would restore the
+    // 3-attempt multiplier that truncates shards, and `--retries` with no value
+    // is a parse error. Lock the value.
+    expect(run).toMatch(/\brun-tests\.js\b[^\n]*\s--retries 0\b/);
+    // And it is on the SAME invocation as the shard split, not a stray mention.
+    expect(run).toMatch(/--retries 0\b[^\n]*-g \$\{\{ matrix\.shard \}\}/);
+  });
+
+  it('does not soften the lane while cutting retries — no continue-on-error, no skip token', () => {
+    // The completeness fix must not have smuggled in a softener. Re-assert the
+    // red-on-fail surface locally to this change: the executable text of the
+    // harness step carries no disarm, and the fail-on-red gate still exists.
+    const run = harnessStep(parse(LANE)).run ?? '';
+    expect(run).not.toContain('continue-on-error');
+    expect(run.toLowerCase()).not.toMatch(/\bskip\b/);
+    expect(code(LANE)).not.toContain('continue-on-error');
+    expect(steps(parse(LANE)).some((s) => /red results/i.test(s.name ?? ''))).toBe(true);
+  });
+});
+
 describe('the lane measures the COMPILED BINARY, not the uncompiled nitro output', () => {
   const script = () => read(DEPLOY_SCRIPT);
 
