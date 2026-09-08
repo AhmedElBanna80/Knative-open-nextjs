@@ -44,7 +44,7 @@ const SPEC = 'tests/compat-matrix.test.ts';
 
 /** The vinext row's leading cell — unique, and the thing #898 added. */
 const VINEXT_ROW_HEAD =
-  '| Official suite — vinext single-executable axis (the SHIPPED artifact, ADR-0048) | ❌ |';
+  '| Official suite — vinext single-executable axis (the SHIPPED artifact, ADR-0048) — **scoped to ESM Next.js apps (`type:module`)** | ❌ |';
 
 const MUTATIONS = [
   {
@@ -70,7 +70,7 @@ const MUTATIONS = [
     subject: 'matrix',
     anchor: VINEXT_ROW_HEAD,
     replacement:
-      '| Official suite — vinext single-executable axis (the SHIPPED artifact, ADR-0048) | ✅ |',
+      '| Official suite — vinext single-executable axis (the SHIPPED artifact, ADR-0048) — **scoped to ESM Next.js apps (`type:module`)** | ✅ |',
   },
   {
     id: 'M3',
