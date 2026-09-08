@@ -519,5 +519,17 @@ jobs:
       # version. A missing member or one stuck at the old version fails the job.
       # Fail-closed on an unreachable registry (a reachability probe), mirroring
       # publish-preflight.mjs — an unanswerable question is never a pass.
+      #
+      # `if:` MATCHES the heal step above exactly (`!cancelled() && gate
+      # succeeded`) rather than the implicit `success()`. Under `success()` a
+      # HARD-FAILED Publish skips this final authority even though the heal step
+      # still ran and may have made the group coherent — so heal's work would go
+      # UNconfirmed in that very run. Running it in precisely the cases heal runs
+      # keeps this the last word on coherence in-run. This does NOT mask the
+      # Publish failure: a later passing step never clears an earlier step's
+      # failure, and the Publish step carries no `continue-on-error`, so a
+      # hard-failed Publish still reds the job. Fail-closed here too — an
+      # unreachable registry is never a pass — so a green here is a real re-confirm.
       - name: Verify the whole group published coherently (post-publish)
+        if: ${{ !cancelled() && steps.gate.outcome == 'success' }}
         run: node scripts/verify-published-group.mjs --post
