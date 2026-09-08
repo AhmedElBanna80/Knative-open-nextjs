@@ -181,6 +181,28 @@ class PromDriftTest(unittest.TestCase):
             hashlib.sha256(canon.encode()).hexdigest(),
         )
 
+    # --- canonical_hash: FIXED VECTOR guarding the exact normalisation ------
+    # test_canonical_hash_formula above recomputes the expected value with the
+    # SAME rstrip("\n") formula, so an over-normalisation regression (rstrip("\n")
+    # -> strip()) stays GREEN there (the M6 mutation the #1022 review flagged).
+    # This test pins a LITERAL expected hash for an input carrying leading,
+    # internal, and non-newline trailing whitespace. rstrip("\n") strips ONLY
+    # trailing newlines, so all that whitespace is KEPT and hashed; strip() would
+    # additionally drop the leading newline/spaces and the trailing spaces/tab,
+    # producing a DIFFERENT hash and reddening this assertion. The constant is
+    # computed for rstrip("\n") semantics — do NOT recompute it from the code.
+    def test_canonical_hash_fixed_vector_pins_rstrip_semantics(self):
+        data = {
+            "a.yml": "\n  leading-and-internal\n  keep me  \n",
+            "b.yml": "   spaced-value\ttab-kept\n\n",
+        }
+        # LITERAL: sha256 of sorted-key "key\nvalue\n" with value.rstrip("\n"),
+        # where the leading newline/spaces and trailing spaces/tab are PRESERVED.
+        self.assertEqual(
+            promdrift.canonical_hash(data),
+            "66ca52146e630c18a4780bafe8970a6ac5b2c739998d8be2d5c69bcf0ff8e84e",
+        )
+
     # --- extract_manifest_cm_data pulls the two block scalars from the real manifest
     def test_extract_manifest_cm_data_from_real_manifest(self):
         data = promdrift.extract_manifest_cm_data(

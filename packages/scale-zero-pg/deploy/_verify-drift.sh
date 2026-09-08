@@ -420,9 +420,16 @@ H_TARGETS=$($K exec deploy/prometheus -- wget -qO- 'http://localhost:9090/api/v1
 H_CMFILE=$(mktemp); H_TGFILE=$(mktemp)
 printf '%s' "$H_CM_JSON" > "$H_CMFILE"
 printf '%s' "$H_TARGETS" > "$H_TGFILE"
+# Capture the python verdict RC WITHOUT letting `set -e` abort first. A non-zero
+# `python3` exit (drift/unreachable) would otherwise kill the script before the
+# `H_RC=$?` below ran — leaving the explicit fail message dead and the two mktemp
+# temp files leaked. The `|| H_RC=$?` makes the failure part of an OR-list (which
+# `set -e` does NOT treat as fatal), so cleanup + the fail message still run and the
+# non-zero verdict still propagates (fail-closed preserved).
+H_RC=0
 H_TRACKED_HASH="$H_TRACKED_HASH" H_TRACKED_JOBS="$H_TRACKED_JOBS" \
 H_ANNOTATION="$H_ANNOTATION" H_CMFILE="$H_CMFILE" H_TGFILE="$H_TGFILE" \
-python3 - <<'PY'
+python3 - <<'PY' || H_RC=$?
 import importlib.util, json, os, sys
 here = os.getcwd()
 spec = importlib.util.spec_from_file_location("promdrift", os.path.join(here, "promdrift.py"))
@@ -448,7 +455,6 @@ obj = {
 }
 sys.exit(promdrift.run_cli_from_obj(obj))
 PY
-H_RC=$?
 rm -f "$H_CMFILE" "$H_TGFILE"
 [ "$H_RC" -eq 0 ] || fail "prometheus config/scrape drift detected (live observability plane diverges from the tracked 60-prometheus.yaml — merged scrape/rule changes are DARK) — see PROMDRIFT lines above (issue #792)"
 

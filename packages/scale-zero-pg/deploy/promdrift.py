@@ -23,9 +23,14 @@ the OKE plane):
   3. every `job_name` in the tracked scrape config is PRESENT and healthy in the
      live Prometheus `/api/v1/targets`.
 
-`canonical_hash()` mirrors _validate.sh's `prom_config_hash` byte-for-byte (sorted
-keys, "key\nvalue\n" concatenation, sha256) so the live ConfigMap `.data` and the
-tracked manifest hash are comparable.
+`canonical_hash()` follows _validate.sh's `prom_config_hash` shape (sorted keys,
+"key\nvalue\n" concatenation, sha256) but adds ONE normalisation `_validate.sh`
+does NOT: each value's TRAILING newlines are `rstrip("\n")`-stripped before hashing.
+That normalisation reconciles the manifest block-scalar form (final newline dropped
+by the extractor) with a kubectl-applied `key: |` value (one trailing newline kept),
+so a healthy cluster compares equal. It is applied to BOTH sides here, so the live
+ConfigMap `.data` and the tracked manifest hash remain comparable — but the digest
+is NOT byte-for-byte identical to `_validate.sh`'s for a value with trailing newlines.
 
 FAIL-CLOSED
 -----------
@@ -71,7 +76,8 @@ def extract_manifest_cm_data(path):
     60-prometheus.yaml-style manifest, using the SAME indent-aware parser as
     _validate.sh's prom_config_hash (stdlib only — no pyyaml). Returns {key: value}
     (values as the manifest's dedented block text) or {} if not found."""
-    text = open(path).read()
+    with open(path) as f:
+        text = f.read()
     cm = None
     for d in re.split(r"(?m)^---\s*$", text):
         if re.search(r"(?m)^kind:\s*ConfigMap\s*$", d) and "name: prometheus-config" in d:
