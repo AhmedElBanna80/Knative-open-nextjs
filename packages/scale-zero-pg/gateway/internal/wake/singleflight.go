@@ -49,6 +49,12 @@ func NewWakeCoalescer() *WakeCoalescer {
 // coalescer never caches a stale success.
 func (c *WakeCoalescer) Do(ctx context.Context, key string, fn func(context.Context) error) error {
 	ch := c.group.DoChan(key, func() (any, error) {
+		// fn is bound to the LEADER's ctx so a #1017 drain force-close can cancel a
+		// coalesced in-flight wake (a graceful-shutdown invariant). The trade: if the
+		// leader disconnects mid-wake its ctx cancels and healthy followers get the
+		// leader's cancel — a TRANSIENT failure, recovered by retry/re-lead because the
+		// key is forgotten on return (next caller re-leads). See
+		// TestLeaderDepartureLetsFollowersRecover.
 		return nil, fn(ctx)
 	})
 	select {

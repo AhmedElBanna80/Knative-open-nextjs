@@ -216,6 +216,7 @@ type blockingWakeDriver struct {
 	entered chan struct{}
 	release chan struct{}
 	once    sync.Once
+	wakes   int32 // total Wake invocations (atomic) — one per coalesced group
 
 	mu sync.Mutex
 	ln net.Listener
@@ -224,6 +225,7 @@ type blockingWakeDriver struct {
 func (*blockingWakeDriver) Mode() string            { return "blocking-fake" }
 func (d *blockingWakeDriver) Resolve(string) Target { return d.tgt }
 func (d *blockingWakeDriver) Wake(ctx context.Context, t Target) error {
+	atomic.AddInt32(&d.wakes, 1)
 	d.once.Do(func() { close(d.entered) })
 	select {
 	case <-d.release:
@@ -310,4 +312,151 @@ func TestWaitingWakerAbortsOnCtxCancel(t *testing.T) {
 	// Release the leader so the test does not leak the goroutine.
 	close(drv.release)
 	<-leaderDone
+}
+
+// TestLeaderDepartureLetsFollowersRecover: the coalesced wake is bound to the
+// LEADER's ctx (deliberate — it is what lets a #1017 drain force-close cancel an
+// in-flight coalesced wake, a graceful-shutdown invariant). This guards the
+// CONSEQUENCE: if the LEADER client disconnects mid-wake, its ctx cancels and the
+// healthy FOLLOWERS waiting on that key receive the leader's cancel error — a
+// spurious TRANSIENT failure, NOT a permanent one. The group self-heals:
+// singleflight forgets the key on the leader's return, so a fresh attempt elects a
+// NEW leader and wakes successfully, and each coalesced group consumes exactly ONE
+// budget token (no per-follower charge, no leak, no poisoned/cached result).
+//
+// This is the leader-departure direction; TestWaitingWakerAbortsOnCtxCancel covers
+// the inverse (a FOLLOWER cancels; the leader is undisturbed).
+func TestLeaderDepartureLetsFollowersRecover(t *testing.T) {
+	const followers = 8
+	tgt := reserveColdTarget(t, "orders")
+	drv := &blockingWakeDriver{tgt: tgt, entered: make(chan struct{}), release: make(chan struct{})}
+	defer drv.closeAll()
+
+	coalescer := NewWakeCoalescer()
+	// A generous budget: the ONLY reason a wake fails here is the leader's cancel, and
+	// guardCalls cleanly counts token consumption per coalesced group.
+	lim := NewWakeLimiter(100, time.Minute)
+	var guardCalls int32
+	opts := Opts{
+		ConnectTimeoutMs: 50,
+		WakeTimeoutMs:    60000, // long: only the leader's ctx-cancel ends the wake
+		RetryMs:          10,
+		WakeGuard: func(key string) error {
+			atomic.AddInt32(&guardCalls, 1)
+			if lim.Allow(key) {
+				return nil
+			}
+			return ErrWakeBudgetExceeded
+		},
+		Coalescer: coalescer,
+	}
+
+	// Leader: a cancellable ctx, pinned inside Wake so it holds the singleflight group
+	// open while the followers pile on.
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, _, _, err := ConnectWithWake(leaderCtx, drv, tgt, opts, nil)
+		leaderErr <- err
+	}()
+	select {
+	case <-drv.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader never entered Wake")
+	}
+
+	// Followers: healthy (background) ctxs. Because the leader still holds the
+	// in-flight group, any follower that reaches DoChan JOINS it — singleflight
+	// guarantees a caller cannot lead a key whose call is still in flight — rather
+	// than starting its own wake.
+	var started sync.WaitGroup
+	started.Add(followers)
+	followerErr := make([]error, followers)
+	var fwg sync.WaitGroup
+	fwg.Add(followers)
+	for i := 0; i < followers; i++ {
+		go func(i int) {
+			defer fwg.Done()
+			started.Done()
+			_, _, _, err := ConnectWithWake(context.Background(), drv, tgt, opts, nil)
+			followerErr[i] = err
+		}(i)
+	}
+	started.Wait()
+	// Let every follower get past its (instant, connection-refused) TryConnect and
+	// register on the leader's group before the leader departs. While the leader is
+	// pinned in Wake the group cannot be forgotten, so this settle only needs to cover
+	// goroutine scheduling; a follower that had instead led would bump guardCalls>1,
+	// which the assertion below catches rather than silently passing.
+	time.Sleep(150 * time.Millisecond)
+	if got := atomic.LoadInt32(&guardCalls); got != 1 {
+		t.Fatalf("pre-cancel wake-budget tokens = %d, want exactly 1 (leader only; followers coalesced, none led)", got)
+	}
+
+	// The LEADER disconnects mid-wake: cancel its ctx. The coalesced wake (bound to
+	// the leader's ctx) fails, and that single shared cancel reaches every follower.
+	cancelLeader()
+
+	// The leader itself returns a cancellation error, bounded (no hang).
+	select {
+	case err := <-leaderErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("leader err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader hung past its cancelled ctx")
+	}
+
+	// Every healthy follower gets the leader's cancel — a CLEAN, retryable transient,
+	// not a permanent failure and not a hang.
+	done := make(chan struct{})
+	go func() { fwg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("followers hung after leader departure (should get the shared cancel promptly)")
+	}
+	for i, err := range followerErr {
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("follower %d err = %v, want a transient context.Canceled (leader departed mid-wake)", i, err)
+		}
+	}
+
+	// Exactly ONE token was consumed for the orphaned group — the leader's. No
+	// follower consumed a token and nothing double-charged: coalesced accounting is
+	// intact even though the group FAILED (one Wake attempt, one budget token).
+	if got := atomic.LoadInt32(&guardCalls); got != 1 {
+		t.Fatalf("post-departure wake-budget tokens = %d, want exactly 1 (one coalesced group)", got)
+	}
+	if got := atomic.LoadInt32(&drv.wakes); got != 1 {
+		t.Fatalf("post-departure scale writes = %d, want exactly 1 (one coalesced Wake)", got)
+	}
+
+	// RECOVERY: the key was forgotten on the leader's return, so a fresh attempt
+	// elects a NEW leader and wakes successfully. Release the driver so the recovery
+	// wake binds its listener and the connect completes promptly.
+	close(drv.release)
+	rctx, rcancel := context.WithCancel(context.Background())
+	defer rcancel()
+	conn, woke, _, err := ConnectWithWake(rctx, drv, tgt, opts, nil)
+	if err != nil {
+		t.Fatalf("recovery wake failed: %v (followers did not recover after leader departure)", err)
+	}
+	if conn == nil {
+		t.Fatal("recovery wake returned a nil conn")
+	}
+	_ = conn.Close()
+	if !woke {
+		t.Fatal("recovery expected woke=true (a fresh cold wake), got the warm fast path — the departed leader left a stale/cached state")
+	}
+
+	// The recovery is a FRESH coalesced group: it consumed its OWN single token
+	// (total 2) and issued its OWN single scale write (total 2). No stale success or
+	// poisoned error was cached from the departed leader.
+	if got := atomic.LoadInt32(&guardCalls); got != 2 {
+		t.Fatalf("post-recovery wake-budget tokens = %d, want 2 (departed group + fresh recovery group)", got)
+	}
+	if got := atomic.LoadInt32(&drv.wakes); got != 2 {
+		t.Fatalf("post-recovery scale writes = %d, want 2 (departed group + fresh recovery group)", got)
+	}
 }
