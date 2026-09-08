@@ -485,6 +485,33 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # ── SELF-HEAL: recover a PARTIAL publish IN-RUN ──────────────────────────
+      # `changeset publish` has TWICE left the fixed group partial — core + the
+      # kn-next alias landed at the target version but lib/db did NOT — because
+      # for a bun workspace it shells to per-package `npm publish`, and a single
+      # per-package failure or registry read-after-write lag can leave a subset
+      # published. The post guard below DETECTS that but cannot PREVENT it (core
+      # is already published, immutable); both times a manual RE-RUN healed it,
+      # proving the partial is transient/per-package.
+      #
+      # This step closes the gap in-run: for every fixed-group member NOT yet
+      # resolvable at the target version, it re-publishes JUST that member's
+      # already-built + workspace-rewritten package dir (the same artifact the
+      # publish above shipped, `^<version>` siblings, never `workspace:`), with
+      # bounded retries + backoff for lag, then FAILS CLOSED if still incoherent.
+      # It re-publishes ONLY the missing members (a present member's version is
+      # immutable) and never certifies from an unreachable registry.
+      #
+      # `if: !cancelled() && gate succeeded`: run even if the Publish step above
+      # hard-failed on a partial, so long as the token was accepted — that is the
+      # case this heals. NODE_AUTH_TOKEN is the same publish credential; the
+      # reviewers must know this step re-publishes with it.
+      - name: Heal a partial publish in-run (re-publish only missing members)
+        if: ${{ !cancelled() && steps.gate.outcome == 'success' }}
+        run: node scripts/ensure-published-group.mjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       # ── GUARD (post): the whole fixed group must have LANDED at one version ──
       # Incident #1 was a PARTIAL publish — `core`+`db` shipped, `lib` skipped,
       # so `core` needed a `lib` version that did not exist. This asks the
