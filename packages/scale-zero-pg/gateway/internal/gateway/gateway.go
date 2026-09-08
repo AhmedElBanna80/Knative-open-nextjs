@@ -285,6 +285,15 @@ func New(env wake.Env, log func(string)) (*Gateway, error) {
 		g.log("[gw] " + t.Key + ": transient wake scale error (attempt " + strconv.Itoa(attempt) +
 			"), retrying within wake budget: " + err.Error())
 	}
+	// Single-flight concurrent 0->1 wakes per compute (issue #1018): a cold fan-out
+	// of N connections to ONE sleeping compute shares a SINGLE wake — one budget
+	// token, one GetScale->UpdateScale — instead of each connection running its own.
+	// This stops false 53400 budget refusals on a legitimate wide cold start and the
+	// apiserver 409-conflict retry storm from N racing scale writes. Shared across
+	// all connections (and inherited by the sleep-race wake-back's retryOpts), so
+	// every wake to a given Target.Key coalesces; the coalescer is ctx-observing, so
+	// a drain force-close still aborts a waiting caller promptly (#1017).
+	g.opts.Coalescer = wake.NewWakeCoalescer()
 	if g.statusProbe != nil {
 		log("[gw] cold-boot readiness: deterministic compute_ctl /status gate ENABLED (port " +
 			strconv.Itoa(g.statusProbe.port) + ", ready=\"" + g.statusProbe.ready +

@@ -85,6 +85,16 @@ type Opts struct {
 	// failed, err its transient error). The gateway wires it to a log line + the
 	// pggw_wake_retries_total metric so 'retried' events are observable. nil = silent.
 	OnWakeRetry func(t Target, attempt int, err error)
+
+	// Coalescer, if non-nil, single-flights concurrent 0->1 wakes per Target.Key
+	// (issue #1018): the first caller of a cold key performs the wake (ONE budget
+	// token via WakeGuard, ONE GetScale->UpdateScale via the bounded retry) and
+	// concurrent callers for the same key WAIT on that in-flight wake's result
+	// instead of each running their own. nil = no coalescing (per-caller wake, the
+	// exact pre-#1018 behaviour). The warm fast path (TryConnect succeeds) is never
+	// coalesced, and each caller still opens its OWN backend connection after the
+	// shared wake lands.
+	Coalescer *WakeCoalescer
 }
 
 // Driver is the mode-agnostic compute interface.
@@ -341,30 +351,47 @@ func ConnectWithWake(ctx context.Context, driver Driver, t Target, opts Opts, on
 		return c, false, 0, nil
 	}
 
-	// The compute is asleep: this connect would trigger a 0->1 scale. Consult the
-	// wake budget FIRST (issue #116) — an over-budget key is refused here, before
-	// onWake logs "waking" and before driver.Wake touches the scale API, so a burst
-	// cannot force unbounded churn.
-	if opts.WakeGuard != nil {
-		if e := opts.WakeGuard(t.Key); e != nil {
-			return nil, false, 0, e
-		}
-	}
-
+	// The compute is asleep: this connect would trigger a 0->1 scale. The wake step
+	// below — consult the wake budget, then issue the bounded idempotent scale — is
+	// the unit that gets SINGLE-FLIGHTED per Target.Key when a Coalescer is set
+	// (issue #1018), so a cold fan-out of N connections to ONE compute consumes ONE
+	// budget token and issues ONE GetScale->UpdateScale, not N of each. Warm connects
+	// never reach here (they return at the TryConnect fast path above), and each
+	// caller still opens its OWN backend connection by polling TryConnect after the
+	// shared wake lands.
 	wakeStart := time.Now()
-	if onWake != nil {
-		onWake()
+	wakeFn := func(c context.Context) error {
+		// Consult the wake budget FIRST (issue #116) — an over-budget key is refused
+		// here, before onWake logs "waking" and before driver.Wake touches the scale
+		// API, so a burst cannot force unbounded churn. Inside the single-flighted
+		// unit, so exactly ONE token is consumed per coalesced wake group.
+		if opts.WakeGuard != nil {
+			if e := opts.WakeGuard(t.Key); e != nil {
+				return e
+			}
+		}
+		if onWake != nil {
+			onWake()
+		}
+		// Bounded idempotent retry/backoff around the scale call (issue #190): a single
+		// transient apiserver blip (TLS handshake timeout, 5xx, throttle, conflict,
+		// context deadline) must NOT surface as a client cold-wake failure. GetScale→
+		// UpdateScale is idempotent, so retry is safe; the retry deadline is the wake
+		// budget, so a genuinely-down apiserver still fails BOUNDED (no hang). A terminal
+		// error (NotFound/Forbidden/…) fails loud immediately.
+		_, e := wakeWithRetry(c, opts, deadline, t, func(cc context.Context) error {
+			return driver.Wake(cc, t)
+		})
+		return e
 	}
-	// Bounded idempotent retry/backoff around the scale call (issue #190): a single
-	// transient apiserver blip (TLS handshake timeout, 5xx, throttle, conflict,
-	// context deadline) must NOT surface as a client cold-wake failure. GetScale→
-	// UpdateScale is idempotent, so retry is safe; the retry deadline is the wake
-	// budget, so a genuinely-down apiserver still fails BOUNDED (no hang). A terminal
-	// error (NotFound/Forbidden/…) fails loud immediately.
-	if _, e := wakeWithRetry(ctx, opts, deadline, t, func(c context.Context) error {
-		return driver.Wake(c, t)
-	}); e != nil {
-		return nil, false, 0, e
+	var wakeErr error
+	if opts.Coalescer != nil {
+		wakeErr = opts.Coalescer.Do(ctx, t.Key, wakeFn)
+	} else {
+		wakeErr = wakeFn(ctx)
+	}
+	if wakeErr != nil {
+		return nil, false, 0, wakeErr
 	}
 	for {
 		c, e := TryConnect(t, connectTimeout)
