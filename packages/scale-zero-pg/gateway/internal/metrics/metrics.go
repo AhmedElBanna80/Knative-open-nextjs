@@ -41,8 +41,23 @@ type Metrics struct {
 	// a rising WakeRetriesTotal that DOES drag WakeFailuresTotal up means the retries
 	// are exhausting (a sustained apiserver outage) — the two together distinguish
 	// 'retried-then-succeeded' from 'failed-after-retries'.
-	WakeRetriesTotal         int `json:"wake_retries_total"`
-	SleepsTotal              int `json:"sleeps_total"`
+	WakeRetriesTotal int `json:"wake_retries_total"`
+	SleepsTotal      int `json:"sleeps_total"`
+	// SleepFailuresTotal counts scale-DOWN (driver.Sleep) attempts that ERRORED.
+	// SleepsTotal counts successes only, so without this there is no denominator:
+	// a compute that repeatedly fails to scale to zero (a phantom keepalive still
+	// billing) is otherwise invisible on Prometheus. Sibling of WakeFailuresTotal
+	// on the cost axis, mirroring WakeFailuresTotal on the latency axis.
+	SleepFailuresTotal int `json:"sleep_failures_total"`
+	// WakeBackFailuresTotal counts TOCTOU wake-back attempts that FAILED: a client
+	// connection arrived while a (successful) sleep was in flight and the gateway
+	// could not scale the compute back up. A rising value means clients are being
+	// left pointed at a compute that was scaled to zero underneath them.
+	WakeBackFailuresTotal int `json:"wake_back_failures_total"`
+	// PeerCheckFailuresTotal counts fleet idle-check (peer scrape) errors that
+	// POSTPONED a sleep. A persistent nonzero value means peer scrapes are failing
+	// and every compute is being pinned awake fleet-wide — a silent cost leak.
+	PeerCheckFailuresTotal   int `json:"peer_check_failures_total"`
 	RejectedConnectionsTotal int `json:"rejected_connections_total"`
 	// WakeBudgetExceededTotal counts wakes REFUSED across all apps because the
 	// requesting app had exhausted its per-app wake budget (issue #116, ADR-0008).
@@ -165,6 +180,29 @@ func (m *Metrics) Sleep() {
 	m.SleepsTotal++
 }
 
+// SleepFailure counts one driver.Sleep error (a compute that did not scale to
+// zero). Distinct from Sleep() so a failed scale-down never counts as a success.
+func (m *Metrics) SleepFailure() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.SleepFailuresTotal++
+}
+
+// WakeBackFailure counts one failed TOCTOU wake-back after a sleep race.
+func (m *Metrics) WakeBackFailure() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.WakeBackFailuresTotal++
+}
+
+// PeerCheckFailure counts one fleet idle-check (peer scrape) error that
+// postponed a sleep.
+func (m *Metrics) PeerCheckFailure() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.PeerCheckFailuresTotal++
+}
+
 // Thread-safe accessors (used by tests and callers).
 func (m *Metrics) Connections() int  { m.mu.Lock(); defer m.mu.Unlock(); return m.ConnectionsTotal }
 func (m *Metrics) Active() int       { m.mu.Lock(); defer m.mu.Unlock(); return m.ActiveConnections }
@@ -172,7 +210,22 @@ func (m *Metrics) Wakes() int        { m.mu.Lock(); defer m.mu.Unlock(); return 
 func (m *Metrics) WakeFailures() int { m.mu.Lock(); defer m.mu.Unlock(); return m.WakeFailuresTotal }
 func (m *Metrics) WakeRetries() int  { m.mu.Lock(); defer m.mu.Unlock(); return m.WakeRetriesTotal }
 func (m *Metrics) Sleeps() int       { m.mu.Lock(); defer m.mu.Unlock(); return m.SleepsTotal }
-func (m *Metrics) Rejected() int     { m.mu.Lock(); defer m.mu.Unlock(); return m.RejectedConnectionsTotal }
+func (m *Metrics) SleepFailures() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.SleepFailuresTotal
+}
+func (m *Metrics) WakeBackFailures() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.WakeBackFailuresTotal
+}
+func (m *Metrics) PeerCheckFailures() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.PeerCheckFailuresTotal
+}
+func (m *Metrics) Rejected() int { m.mu.Lock(); defer m.mu.Unlock(); return m.RejectedConnectionsTotal }
 func (m *Metrics) WakeBudgetExceededCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -195,6 +248,9 @@ func (m *Metrics) PromText() string {
 		fmt.Sprintf("pggw_wake_failures_total %d", m.WakeFailuresTotal),
 		fmt.Sprintf("pggw_wake_retries_total %d", m.WakeRetriesTotal),
 		fmt.Sprintf("pggw_sleeps_total %d", m.SleepsTotal),
+		fmt.Sprintf("pggw_sleep_failures_total %d", m.SleepFailuresTotal),
+		fmt.Sprintf("pggw_wake_back_failures_total %d", m.WakeBackFailuresTotal),
+		fmt.Sprintf("pggw_peer_check_failures_total %d", m.PeerCheckFailuresTotal),
 		fmt.Sprintf("pggw_rejected_connections_total %d", m.RejectedConnectionsTotal),
 		fmt.Sprintf("pggw_wake_budget_exceeded_total %d", m.WakeBudgetExceededTotal),
 		fmt.Sprintf("pggw_replication_connections_total %d", m.ReplicationConnectionsTotal),
