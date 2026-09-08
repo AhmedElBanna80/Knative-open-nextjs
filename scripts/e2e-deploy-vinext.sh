@@ -100,6 +100,21 @@ PLUGIN_RSC_VERSION="${KNEXT_PLUGIN_RSC_VERSION:-0.5.34}"
 # runtime coherent, which `--legacy-peer-deps` (accept-and-skew) would not.
 REACT_VERSION="${KNEXT_REACT_VERSION:-19.2.6}"
 
+# ── the compile toggle (diagnostic opt-in; DEFAULT = 1 = compiled) ─────────────
+# The shipped-artifact lane boots the COMPILED single executable, and that is the
+# unchanged default (KNEXT_COMPILE=1). `KNEXT_COMPILE=0` is a DIAGNOSTIC opt-in
+# ONLY: it skips the `bun build --compile` step (§5-6) and boots the SAME vite
+# build UNCOMPILED — the nitro `.output/server/index.mjs` under bun (§7) — so a
+# runtime red can be PARTITIONED:
+#
+#   * fails compiled AND uncompiled → a vite-pipeline / runtime bug (present both ways)
+#   * fails compiled ONLY           → a compile-step bug (sharp dlopen / asset-root /
+#                                     bytecode — the single-exec-specific bucket)
+#
+# This is NOT a new default and NOT a softening of the lane: the manifest, corpus,
+# shard count, summary and ledger are identical; only the artifact under test moves.
+KNEXT_COMPILE="${KNEXT_COMPILE:-1}"
+
 log "installing knext tarballs + the pinned vinext toolchain (vinext@${VINEXT_VERSION}, vite@${VITE_VERSION}, nitro@${NITRO_VERSION}, react@${REACT_VERSION})"
 npm install --no-audit --no-fund --loglevel=error \
   "${LIB_TGZ}" "${DB_TGZ}" "${CORE_TGZ}" \
@@ -198,52 +213,77 @@ fi
 # compile a `kn-next build --target=vinext` user gets. No repo-source fallback:
 # silently compiling with an uninstalled copy would make the number describe an
 # artifact nobody ships.
-COMPILE_SCRIPT="${APP_DIR}/node_modules/@getknext/core/dist/adapters/vinext-compile.js"
-if [ ! -f "${COMPILE_SCRIPT}" ]; then
-  log "ERROR: the installed @getknext/core ships no dist/adapters/vinext-compile.js (${COMPILE_SCRIPT}) — the packed tarball is not the shipped shape"
-  exit 1
-fi
-
-KNEXT_EXEC="${APP_DIR}/knext-exec-e2e"
-log "compiling the single executable (bun, bytecode, minified) → ${KNEXT_EXEC}"
-if ! bun run "${COMPILE_SCRIPT}" --entry "${NITRO_ENTRY}" --outfile "${KNEXT_EXEC}" >&2; then
-  log "ERROR: the single-executable compile failed for this fixture"
-  exit 1
-fi
-if [ ! -x "${KNEXT_EXEC}" ]; then
-  log "ERROR: ${KNEXT_EXEC} was not produced (or is not executable)"
-  exit 1
-fi
-
-# ── 6. stage sharp's addon beside the binary ──────────────────────────────────
-# The compiled binary cannot dlopen a path inside its own virtual filesystem, so
-# the addon has to be a real file next to the executable. Absent sharp is fine
-# and silent — a fixture that never touches next/image pulls no @img packages.
-for candidate in \
-  "${APP_DIR}/node_modules/@img" \
-  "${APP_DIR}/node_modules/.bun/node_modules/@img"; do
-  if [ -d "${candidate}" ]; then
-    mkdir -p "${APP_DIR}/native"
-    cp -RL "${candidate}"/* "${APP_DIR}/native/" 2>/dev/null || true
-    log "staged sharp native packages from ${candidate} → ${APP_DIR}/native"
-    break
+#
+# Gated on KNEXT_COMPILE: in the default (compiled) mode we build the binary and
+# boot it; in the diagnostic (KNEXT_COMPILE=0) mode BOTH the compile (§5) and the
+# sharp-staging (§6, which exists only because the binary cannot dlopen its own
+# vfs) are skipped, and the uncompiled nitro entry is booted directly under bun.
+if [ "${KNEXT_COMPILE}" != "0" ]; then
+  COMPILE_SCRIPT="${APP_DIR}/node_modules/@getknext/core/dist/adapters/vinext-compile.js"
+  if [ ! -f "${COMPILE_SCRIPT}" ]; then
+    log "ERROR: the installed @getknext/core ships no dist/adapters/vinext-compile.js (${COMPILE_SCRIPT}) — the packed tarball is not the shipped shape"
+    exit 1
   fi
-done
 
-# ── 7. boot THE BINARY on a free port ─────────────────────────────────────────
+  KNEXT_EXEC="${APP_DIR}/knext-exec-e2e"
+  log "compiling the single executable (bun, bytecode, minified) → ${KNEXT_EXEC}"
+  if ! bun run "${COMPILE_SCRIPT}" --entry "${NITRO_ENTRY}" --outfile "${KNEXT_EXEC}" >&2; then
+    log "ERROR: the single-executable compile failed for this fixture"
+    exit 1
+  fi
+  if [ ! -x "${KNEXT_EXEC}" ]; then
+    log "ERROR: ${KNEXT_EXEC} was not produced (or is not executable)"
+    exit 1
+  fi
+
+  # ── 6. stage sharp's addon beside the binary ────────────────────────────────
+  # The compiled binary cannot dlopen a path inside its own virtual filesystem, so
+  # the addon has to be a real file next to the executable. Absent sharp is fine
+  # and silent — a fixture that never touches next/image pulls no @img packages.
+  for candidate in \
+    "${APP_DIR}/node_modules/@img" \
+    "${APP_DIR}/node_modules/.bun/node_modules/@img"; do
+    if [ -d "${candidate}" ]; then
+      mkdir -p "${APP_DIR}/native"
+      cp -RL "${candidate}"/* "${APP_DIR}/native/" 2>/dev/null || true
+      log "staged sharp native packages from ${candidate} → ${APP_DIR}/native"
+      break
+    fi
+  done
+else
+  KNEXT_EXEC=""
+  log "KNEXT_COMPILE=0 — DIAGNOSTIC uncompiled boot: skipping the single-executable compile (§5) and sharp staging (§6); the UNCOMPILED nitro output will be booted under bun (partitions compile-step bugs from vite-pipeline/runtime bugs)"
+fi
+
+# ── 7. boot the artifact on a free port ───────────────────────────────────────
 # HOSTNAME is emptied rather than pinned (the node lane's B7a finding: a pinned
 # 127.0.0.1 misclassifies same-origin middleware rewrites as external).
+#
+# Which artifact: the COMPILED binary in the default mode; the UNCOMPILED nitro
+# entry under bun when KNEXT_COMPILE=0. Everything downstream (readiness, metadata,
+# the single stdout URL line) is identical either way.
 PORT="$(free_port)"
 BUILD_ID="$(cat "${APP_DIR}/.next/BUILD_ID" 2>/dev/null || echo "${DEPLOYMENT_ID}")"
 
-log "booting the compiled binary ${KNEXT_EXEC} on 0.0.0.0:${PORT}"
-(
-  cd "${APP_DIR}"
-  PORT="${PORT}" HOSTNAME="" NODE_ENV="production" \
-    NEXT_DEPLOYMENT_ID="${DEPLOYMENT_ID}" \
-    exec "${KNEXT_EXEC}"
-) >"${SERVER_LOG}" 2>&1 &
-SERVER_PID=$!
+if [ "${KNEXT_COMPILE}" != "0" ]; then
+  log "booting the compiled binary ${KNEXT_EXEC} on 0.0.0.0:${PORT}"
+  (
+    cd "${APP_DIR}"
+    PORT="${PORT}" HOSTNAME="" NODE_ENV="production" \
+      NEXT_DEPLOYMENT_ID="${DEPLOYMENT_ID}" \
+      exec "${KNEXT_EXEC}"
+  ) >"${SERVER_LOG}" 2>&1 &
+  SERVER_PID=$!
+else
+  log "booting the UNCOMPILED vinext output ${NITRO_ENTRY} under bun on 0.0.0.0:${PORT}"
+  (
+    cd "${APP_DIR}"
+    PORT="${PORT}" HOSTNAME="" NODE_ENV="production" \
+      NEXT_DEPLOYMENT_ID="${DEPLOYMENT_ID}" \
+      exec bun "${NITRO_ENTRY}"
+  ) >"${SERVER_LOG}" 2>&1 &
+  SERVER_PID=$!
+fi
 
 # ── 8. persist metadata BEFORE probing, so cleanup can always find it ─────────
 # Same keys scripts/e2e-cleanup.sh + scripts/e2e-logs.sh read on the node lane,
@@ -257,6 +297,10 @@ SERVER_PID=$!
   echo "RUNTIME_VERSION=$(bun --version 2>/dev/null || echo unknown)"
   echo "BUILDER=${BUILDER}"
   echo "KNEXT_EXEC=${KNEXT_EXEC}"
+  # Record WHICH artifact this run measured, so a ledger/evidence bundle names the
+  # axis: COMPILED=true (default, the shipped single executable) vs COMPILED=false
+  # (KNEXT_COMPILE=0 diagnostic, the uncompiled nitro output under bun).
+  echo "COMPILED=$([ "${KNEXT_COMPILE}" != "0" ] && echo true || echo false)"
   echo "SERVER_LOG=${SERVER_LOG}"
   echo "BUILD_LOG=${BUILD_LOG}"
 } >"${LOG_FILE}"
@@ -291,7 +335,7 @@ if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
   server_died
 fi
 
-log "deployment ready (vinext single executable): build=${BUILD_ID} deployment=${DEPLOYMENT_ID} pid=${SERVER_PID}"
+log "deployment ready (vinext $([ "${KNEXT_COMPILE}" != "0" ] && echo "single executable" || echo "UNCOMPILED nitro output under bun")): build=${BUILD_ID} deployment=${DEPLOYMENT_ID} pid=${SERVER_PID}"
 
 # ── 10. the ONLY stdout line: the deployment URL ──────────────────────────────
 echo "http://localhost:${PORT}"
