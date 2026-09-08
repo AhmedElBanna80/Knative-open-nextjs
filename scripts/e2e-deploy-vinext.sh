@@ -83,7 +83,13 @@ fi
 VINEXT_VERSION="${KNEXT_VINEXT_VERSION:-1.0.0-beta.8}"
 VITE_VERSION="${KNEXT_VITE_VERSION:-8.2.2}"
 NITRO_VERSION="${KNEXT_NITRO_VERSION:-3.0.260610-beta}"
-PLUGIN_RSC_VERSION="${KNEXT_PLUGIN_RSC_VERSION:-0.5.26}"
+# vinext@1.0.0-beta.8 declares `@vitejs/plugin-rsc@^0.5.34` as an (optional) peer.
+# Because the toolchain install pulls this package explicitly, npm enforces that
+# range even though the peer is optional — 0.5.26 does NOT satisfy `^0.5.34`, so
+# every fixture install still aborts with `npm ERESOLVE` (a SECOND conflict edge
+# that only surfaces after the react-family pin is fixed, since npm reports one
+# edge at a time). Pinned at 0.5.34 the whole toolchain install resolves cleanly.
+PLUGIN_RSC_VERSION="${KNEXT_PLUGIN_RSC_VERSION:-0.5.34}"
 # The React family (react, react-dom, react-server-dom-webpack) is versioned in
 # lockstep upstream and MUST be pinned together here. vinext@1.0.0-beta.8 declares
 # a `react@^19.2.6` peer; the corpus fixtures otherwise pull react@19.2.4
