@@ -60,6 +60,8 @@ jobs:
         with: { python-version: "3.12" }
       - name: prometheus config/scrape drift-logic tests
         run: python3 -m unittest discover -s deploy -p 'test_promdrift.py' -v
+      - name: _verify-drift.sh §H set -e RC-capture regression (message + temp-file cleanup)
+        run: bash deploy/test_verify-drift-seterr.sh
 
   # provision-app.sh app-name / reserved-name validation (issues #79/#74). No
   # cluster: validate_app_name runs before any kubectl call, so bad names fail
