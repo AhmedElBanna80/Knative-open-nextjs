@@ -218,6 +218,107 @@ describe('the lane measures the COMPILED BINARY, not the uncompiled nitro output
   });
 });
 
+describe('fixture normalization is EXPLICIT and bounded to the ESM app contract — not softening', () => {
+  // The lane's honesty rests on measuring the fixture, changed only in the ways
+  // a knext-vinext user's own app is already shaped. Two normalizations are
+  // legitimate and NO MORE:
+  //   (a) the per-fixture `vite.config.mjs` injection (already asserted above), and
+  //   (b) merging `"type":"module"` into the fixture's package.json — knext's
+  //       scaffolder writes it into every generated app (package.json.hbs) and the
+  //       vinext build assumes ESM, so this is normalization-to-contract, the SAME
+  //       class as (a). It is NOT softening: a CommonJS-app limitation is a tracked,
+  //       separate gap and this axis's compat claim is scoped to ESM apps.
+  // Anything BROADER — deleting failing test/spec files, rewriting fixture source,
+  // narrowing the manifest — is softening the number, and must red here.
+  const script = () => read(DEPLOY_SCRIPT);
+  const executable = () =>
+    script()
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+
+  it('MERGES `type:module` into the fixture package.json, in CODE and not only in prose', () => {
+    // Comments are stripped first: an earlier sibling guard here stayed green
+    // against a mutation because the header comment still named the thing the
+    // code no longer did. Assert the mutation is a real, executed statement.
+    const lines = script()
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'));
+    const setsType = lines.filter((l) => /pkg\.type\s*=\s*["']module["']/.test(l));
+    expect(setsType.length, 'the harness must set pkg.type="module" on the fixture').toBe(1);
+  });
+
+  it('MERGES rather than overwrites — it reads the fixture package.json before writing it', () => {
+    // A merge preserves the fixture's own deps/scripts/everything else and changes
+    // one key; an overwrite would test a different app. The read-before-write is
+    // what makes it a merge.
+    const e = executable();
+    expect(e).toMatch(/readFileSync\([^)]*"utf8"\)/);
+    expect(e).toContain('JSON.parse(');
+    expect(e).toMatch(/writeFileSync\(/);
+  });
+
+  it('does NOT delete or rewrite fixture tests or source to force a pass', () => {
+    // The only fixture mutations permitted are (a) vite.config.mjs and (b) the
+    // type:module merge. Deleting a failing test file, or rewriting fixture
+    // source, inflates the number by removing what it measures — the exact
+    // softening the red-on-fail contract forbids. Scan for the shapes that do it.
+    // The scan is broadened past the two verbs it first knew (`rm`,
+    // `find … -delete`): a deletion has more shapes than those two, and #1032's
+    // code review named three the enumeration missed — `unlink(Sync)`, a `: >`
+    // truncate-to-empty, and `git rm`. Each removes what the lane measures.
+    const e = executable();
+    expect(e, 'no rm of .test/.spec files in the fixture').not.toMatch(
+      /\brm\b[^\n]*\.(test|spec)\b/,
+    );
+    expect(e, 'no blanket removal of a fixture test/ directory').not.toMatch(
+      /\brm\b[^\n]*(?:\btest\b|__tests__)\//,
+    );
+    expect(e, 'no find … -delete sweep over the fixture').not.toMatch(/\bfind\b[^\n]*-delete\b/);
+    expect(e, 'no unlink(Sync) of .test/.spec files').not.toMatch(
+      /\bunlink(?:Sync)?\b[^\n]*\.(test|spec)\b/,
+    );
+    expect(e, 'no `: >` truncate-to-empty of a .test/.spec file').not.toMatch(
+      /:\s*>\s*[^\n]*\.(test|spec)\b/,
+    );
+    expect(e, 'no git rm of .test/.spec files').not.toMatch(/\bgit\s+rm\b[^\n]*\.(test|spec)\b/);
+  });
+
+  it('LIMITS per-fixture edits to the closed allowlist — a novel source rewrite or manifest narrowing reds', () => {
+    // Denylist → closed allowlist (#1032 sysdesign non-blocking #2). The two
+    // legitimate normalizations are asserted positively above; here we assert
+    // NOTHING ELSE edits the fixture in place. The sibling scan enumerates the
+    // deletion SHAPES it knows — but a novel rewrite it never listed (a `sed -i`
+    // over a .tsx, a SECOND `node -e` writeFileSync into fixture source, a line
+    // that narrows the shared corpus manifest) would slip straight through an
+    // enumeration. Close the set rather than keep extending the denylist.
+    const e = executable();
+
+    // (1) EXACTLY ONE writeFileSync — the type:module merge. A second one is the
+    // most direct way to rewrite a fixture source file from node, and the
+    // positive guard above (presence, not count) cannot see it.
+    const writes = e.match(/writeFileSync\(/g) ?? [];
+    expect(writes.length, 'the only writeFileSync is the type:module merge').toBe(1);
+
+    // (2) No in-place stream editor. None is needed by this script; each is a
+    // fixture-source rewrite in disguise.
+    expect(e, 'no sed -i in-place edit').not.toMatch(/\bsed\b[^\n]*\s-[a-zA-Z]*i\b/);
+    expect(e, 'no perl -i in-place edit').not.toMatch(/\bperl\b[^\n]*\s-[a-zA-Z]*i\b/);
+    expect(e, 'no awk -i in-place edit').not.toMatch(/\bawk\b[^\n]*-i\b/);
+
+    // (3) No shell redirection into a fixture SOURCE file. The only redirects
+    // this script makes are into knext artifacts (`.log`) and the one `.mjs`
+    // vite config (asserted above); `> src/x.tsx` is a source rewrite.
+    expect(e, 'no shell redirect into a fixture .ts/.tsx/.js/.jsx/.cjs source').not.toMatch(
+      />>?\s*"?[^"\n;|&<>\s]*\.(tsx?|jsx?|cjs)\b/,
+    );
+
+    // (4) The deploy script must NOT touch the shared corpus manifest — narrowing
+    // it here would inflate the number while still looking like the node lane's.
+    expect(e, 'the deploy script never references the corpus manifest').not.toMatch(/manifest/i);
+  });
+});
+
 describe('the packed @getknext/core preflight verifies the compile script — and does so SIGPIPE-safely', () => {
   // Run 33965643199 (the vinext lane's first firing PAST the pnpm→bun fix) died
   // at "Preflight — the packed @getknext/core ships the compile script" reporting
