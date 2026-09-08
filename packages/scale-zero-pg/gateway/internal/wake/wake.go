@@ -371,9 +371,18 @@ func ConnectWithWake(ctx context.Context, driver Driver, t Target, opts Opts, on
 		if e == nil {
 			return c, true, time.Since(wakeStart).Milliseconds(), nil
 		}
+		// A cancelled ctx (e.g. a drain force-close) aborts the wake poll promptly
+		// instead of spinning to the full wake deadline.
+		if ctx.Err() != nil {
+			return nil, false, 0, ctx.Err()
+		}
 		if time.Now().After(deadline) {
 			return nil, false, 0, fmt.Errorf("wake timed out for %s: %v", t.Key, e)
 		}
-		time.Sleep(retry)
+		select {
+		case <-time.After(retry):
+		case <-ctx.Done():
+			return nil, false, 0, ctx.Err()
+		}
 	}
 }
