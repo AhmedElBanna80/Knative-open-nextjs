@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"testing"
@@ -225,6 +226,116 @@ func TestDrainForceClosesMidWakeConnection(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Drain hung — mid-wake force-close (cancel wake ctx + close conns) is missing")
+	}
+}
+
+// build57P03 constructs a Postgres ErrorResponse ('E') carrying SQLSTATE 57P03
+// ("the database system is starting up" / crash recovery), the exact FATAL the
+// gateway's handshakeUntilReady loop absorbs and retries on.
+func build57P03() []byte {
+	body := []byte{'C'}
+	body = append(body, []byte("57P03")...)
+	body = append(body, 0) // terminate the 'C' field
+	body = append(body, 0) // terminate the field list
+	msg := []byte{'E', 0, 0, 0, 0}
+	binary.BigEndian.PutUint32(msg[1:5], uint32(4+len(body)))
+	return append(msg, body...)
+}
+
+// crashRecoveryCompute is an always-on backend that ACCEPTS TCP immediately and,
+// on every handshake attempt, replies with a FATAL 57P03 then closes — mimicking a
+// Postgres that is up enough to answer TCP but still in crash recovery. That keeps
+// the gateway spinning inside handshakeUntilReady's 57P03 retry loop until the wake
+// deadline, which is the loop the drain-cancellation fix must break out of.
+type crashRecoveryCompute struct {
+	ln       net.Listener
+	accepted chan struct{}
+}
+
+func startCrashRecoveryCompute(t *testing.T) *crashRecoveryCompute {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen crash-recovery compute: %v", err)
+	}
+	cc := &crashRecoveryCompute{ln: ln, accepted: make(chan struct{}, 64)}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				b := make([]byte, 4096)
+				_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+				_, _ = c.Read(b) // consume the replayed StartupMessage
+				_ = c.SetReadDeadline(time.Time{})
+				select {
+				case cc.accepted <- struct{}{}:
+				default:
+				}
+				_, _ = c.Write(build57P03()) // FATAL 57P03, then close -> gateway retries
+			}(conn)
+		}
+	}()
+	t.Cleanup(func() { _ = ln.Close() })
+	return cc
+}
+
+// AC-57P03-drain: a connection stuck in handshakeUntilReady's 57P03 crash-recovery
+// retry loop must observe a drain force-close PROMPTLY. That branch closes the
+// backend, checks only the WAKE deadline (not ctx), sleeps, and reconnects via
+// ConnectWithWake — whose early-success path returns WITHOUT observing ctx (a
+// backend in crash recovery still accepts TCP). So if the force-close lands during
+// the retry sleep, without a ctx check the loop spins until GW_WAKE_TIMEOUT_MS,
+// blocking Drain's post-deadline wg.Wait() long past its own deadline and the pod's
+// terminationGracePeriodSeconds — the co-draining reset #1016 exists to prevent.
+// Drain must instead force the loop to abort and return within a bound close to its
+// deadline, and the stuck goroutine must reach cleanup (wg -> 0).
+func TestDrainAbortsMidWake57P03RetryLoop(t *testing.T) {
+	cc := startCrashRecoveryCompute(t)
+	gw, addr := newDrainGatewayTo(t, cc.ln.Addr().String())
+
+	// Drive a client until the gateway is looping on 57P03 (past accept -> wg
+	// registered at handle-entry, deep inside handshakeUntilReady).
+	c := dialGateway(t, addr)
+	c.c.Write(proto.BuildSSLRequest())
+	c.waitFor(t, func(b []byte) bool { return len(b) >= 1 }, 5*time.Second) // 'N'
+	c.c.Write(proto.BuildStartup(map[string]string{"user": "app", "database": "testdb"}))
+	select {
+	case <-cc.accepted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("gateway never reached the backend handshake")
+	}
+
+	// Deadline SHORTER than GW_WAKE_TIMEOUT_MS (5000ms) and short vs the retry
+	// cadence (50ms) so the force-close reliably lands during a retry sleep.
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- gw.Drain(ctx) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Drain returned nil while a session was stuck in the 57P03 retry loop; expected a deadline error")
+		}
+		if el := time.Since(start); el > 2*time.Second {
+			t.Fatalf("Drain took %v — the 57P03 retry loop ignored ctx cancellation and spun until the wake deadline", el)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Drain hung — the 57P03 retry loop never observed the drain force-close (ctx ignored on the reconnect path)")
+	}
+
+	// Drain's deadline path returns only AFTER wg.Wait(), so a bounded return already
+	// implies the stuck goroutine ran cleanup (wg -> 0). Confirm belt-and-suspenders:
+	// a second Drain finds nothing live and returns immediately.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	if err := gw.Drain(ctx2); err != nil {
+		t.Fatalf("second Drain returned error — the 57P03 goroutine was not cleaned up (wg != 0): %v", err)
 	}
 }
 

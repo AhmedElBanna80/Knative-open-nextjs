@@ -895,12 +895,28 @@ func (g *Gateway) handshakeUntilReady(ctx context.Context, reg *connReg, conn ne
 			return nil, nil, errors.New("backend kept reporting 57P03 (starting up) past the wake deadline")
 		}
 		time.Sleep(retry)
+		// A drain force-close cancels ctx during the sleep above. Unlike the
+		// interruptible read at the top of the loop, that sleep is not ctx-guarded
+		// and the reconnect below can succeed without observing ctx (a backend in
+		// crash recovery still accepts TCP, so ConnectWithWake's early-success path
+		// returns a live conn regardless of ctx). Check here so the force-close is
+		// honored promptly instead of spinning until the wake deadline.
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 		next, _, _, err := wake.ConnectWithWake(ctx, g.driver, target, retryOpts, nil)
 		if err != nil {
 			return nil, nil, err
 		}
 		conn = next
 		reg.setBackend(conn) // track the swapped conn for force-close
+		// Belt-and-suspenders: ConnectWithWake's early-success (TryConnect) path can
+		// return without observing ctx, so re-check before looping back into another
+		// interruptible read — a force-close during the dial must abort here too.
+		if ctx.Err() != nil {
+			_ = conn.Close()
+			return nil, nil, ctx.Err()
+		}
 		if tcp, ok := conn.(*net.TCPConn); ok {
 			_ = tcp.SetNoDelay(true)
 		}
