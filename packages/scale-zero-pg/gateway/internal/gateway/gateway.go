@@ -994,6 +994,7 @@ func (g *Gateway) scheduleSleep(e *activeEntry, target wake.Target) {
 			cancel()
 			if err != nil || n > 0 {
 				if err != nil {
+					g.metrics.PeerCheckFailure()
 					g.log("[gw] " + target.Key + ": peer check failed (" + err.Error() + "), postponing sleep")
 				} else {
 					g.log("[gw] " + target.Key + ": " + strconv.Itoa(n) + " active connection(s) on peer gateways, postponing sleep")
@@ -1017,6 +1018,7 @@ func (g *Gateway) scheduleSleep(e *activeEntry, target wake.Target) {
 		g.mu.Unlock()
 
 		if err := g.driver.Sleep(context.Background(), target); err != nil {
+			g.metrics.SleepFailure()
 			g.log("[gw] " + target.Key + ": sleep failed: " + err.Error())
 			return
 		}
@@ -1032,6 +1034,7 @@ func (g *Gateway) scheduleSleep(e *activeEntry, target wake.Target) {
 		if arrived {
 			g.log("[gw] " + target.Key + ": connection arrived during scale-down, waking back")
 			if err := g.driver.Wake(context.Background(), target); err != nil {
+				g.metrics.WakeBackFailure()
 				g.log("[gw] " + target.Key + ": wake-back failed: " + err.Error())
 			}
 		}

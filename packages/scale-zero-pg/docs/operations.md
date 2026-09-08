@@ -49,7 +49,9 @@ Scrape each gateway pod's `:9090/metrics` (Prometheus text) or read `/metrics.js
 | `pggw_wake_retries_total` | transient scale-call blips **retried** and absorbed (issue #190). Rising while `pggw_wake_failures_total` stays flat = retries are silently rescuing wakes the old path would have failed (*retried-then-succeeded*). Rising **together with** `pggw_wake_failures_total` = a sustained apiserver outage — retries are exhausting (*failed-after-retries*). Each retry also logs `transient wake scale error (attempt N), retrying within wake budget`. |
 | `pggw_wake_latency_ms_last` | last wake duration (per pod — take max across pods, don't sum) |
 | `pggw_active_connections` | live client connections (per pod — sum across pods) |
-| `pggw_sleeps_total` | scale-to-zero events |
+| `pggw_sleeps_total` / `pggw_sleep_failures_total` | scale-to-zero events succeeded / **failed**. A rising `pggw_sleep_failures_total` means a compute is not reaching zero after idle — a phantom keepalive that keeps billing. `pggw_sleeps_total` counts successes only, so this failure counter is the denominator you alert on; without it a repeatedly-failing scale-down is invisible. |
+| `pggw_wake_back_failures_total` | TOCTOU wake-backs that **failed**: a client connection arrived while a (successful) scale-down was in flight and the compute could not be scaled back up. A rising value means clients may be left pointed at a compute scaled to zero underneath them. |
+| `pggw_peer_check_failures_total` | fleet idle-check (peer scrape) errors that **postponed** a sleep. A persistent nonzero value means peer scrapes are failing and every compute is being pinned awake fleet-wide — a silent cost leak. Not a sleep failure: the scale-down was deferred, not attempted. |
 | `pggw_system_*{system=...}` | the same, per database key |
 
 **Alerting is deployed and drilled**, not aspirational. Prometheus
