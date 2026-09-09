@@ -188,6 +188,36 @@ else
   log "no package.json in fixture — skipping ESM normalization"
 fi
 
+# ── 3b. TEMPORARY: apply the cloudflare/vinext#3197 overlay ───────────────────
+# vinext@1.0.0-beta.8 points its `ssr` vite-environment build `input` at the
+# context-bag server entry (`VIRTUAL_SERVER_ENTRY`) even when the nitro plugin is
+# present. Nitro registers that environment as its SSR service and dispatches via
+# `mod.default.fetch(...)`, but the context bag has no `.fetch`, so EVERY dynamic
+# route 500s (`n.fetch is not a function`). The confirmed one-line fix re-points
+# the input to vinext's own worker entry under nitro. Until upstream ships #3197,
+# knext overlays the installed dist so the vinext lane builds with dynamic routes
+# working (500→200). Remove this whole block when vinext releases the fix.
+#
+# FAIL-CLOSED: the patcher errors (exit non-zero) if its anchor is not found
+# exactly once — a vinext version bump that moves the anchor reds THIS lane rather
+# than silently reverting to the #3197 bug. It is idempotent and does not touch
+# the node/cloudflare targets (the re-point is gated on `hasNitroPlugin`).
+PATCH_SCRIPT="${KNEXT_REPO_ROOT:-}/scripts/patch-vinext-3197.mjs"
+if [ ! -f "${PATCH_SCRIPT}" ]; then
+  # Resolve relative to this script when KNEXT_REPO_ROOT is unset (harness runs
+  # with cwd = the fixture dir, so the script cannot assume its own location).
+  PATCH_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patch-vinext-3197.mjs"
+fi
+if [ ! -f "${PATCH_SCRIPT}" ]; then
+  log "ERROR: cannot locate scripts/patch-vinext-3197.mjs (the #3197 overlay) — refusing to build the vinext lane with dynamic routes broken"
+  exit 1
+fi
+log "applying TEMPORARY cloudflare/vinext#3197 overlay to the installed vinext dist (fail-closed)"
+if ! node "${PATCH_SCRIPT}" "${APP_DIR}" >&2; then
+  log "ERROR: the vinext#3197 overlay could not be applied — its anchor moved (vinext version bump?). This lane will not build a #3197-fixed artifact until the overlay is re-derived."
+  exit 1
+fi
+
 # The deployment identity the harness's skew/asset tests key on. Generated
 # BEFORE the build so the build and the runtime agree.
 DEPLOYMENT_ID="${NEXT_DEPLOYMENT_ID:-knext-vinext-$(date +%s)-$$}"
