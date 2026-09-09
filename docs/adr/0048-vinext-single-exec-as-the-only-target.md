@@ -209,3 +209,48 @@ Concretely:
   widened, operator taught the shape, CLI emits the resolved builder explicitly.
 - **Upgrade order is load-bearing (#548):** a CRD that predates `"vinext"` rejects the new CR
   under `--validate=strict` — loud, before the cluster is touched. Operator/CRD first, then CLI.
+
+## Amendment 4 — the cold-start premise does NOT hold at the deployment layer (measured on OKE, 2026-09-09)
+
+**This decision rests (§"The measurement this rests on") on a 14.5× / 61 ms cold-start win for the
+single executable. That measurement was a LOCAL `spawn → first HTTP response`, fresh process per
+sample — i.e. a warm-page-cache process spawn, not Knative scale-from-zero. Re-measured on the actual
+deployment substrate, the win does not survive.**
+
+**OKE scale-from-zero** (`context-ckmva7v7zvq`, both deployed via `NextApp` CRs, running-revision
+config verified identical except image/build, serialized paired cold cycles, scaled to zero between
+each, static `/api/health`, n=7):
+
+| variant | cold-start median | min–max | image |
+|---|---|---|---|
+| node-standalone (turbopack) | 3610 ms | 3143–3948 | 66.6 MiB |
+| vinext single-exec (bun 1.4) | 3401 ms | 3226–3761 | 42.9 MiB |
+
+**Statistically tied** — bun ~209 ms (~6%) faster median, ranges fully overlap. The Knative
+`activate → schedule → boot → ready` pipeline (~3.4–3.6 s) dominates and **swamps the runtime/bytecode
+delta**. The §measurement's 61 ms was real *as a local process spawn* but is **not** the cold start a
+scale-to-zero user feels.
+
+Corroborating (local, separate bench 2026-09-09, `.claude/oke-coldstart-bench.md` +
+`.claude/bytecode-coldstart-bench.md`):
+- **Bytecode caching moves cold start only ~14–16 ms** on small apps — cold start is IO/scheduling-
+  bound, re-confirming the pre-ADR finding this decision had set aside.
+- A local **cold-inode** fault of the 65 MB binary cost ~1789 ms (vs ~83 ms interpreted) — but that
+  penalty **did NOT reproduce on OKE** (image-layer residency), so "the binary is materially *worse*
+  cold" is **refuted**. Single-exec is cold-**neutral**, not cold-losing and not cold-winning.
+
+**What this changes:** the single executable's justification can no longer rest on cold start. Its
+real, measured advantages are **smaller image (43 vs 67 MiB), faster *warm* request latency, and
+single-artifact ops** — not scale-from-zero speed. Meanwhile the node-standalone target it displaced
+is **cold-tied on OKE, passes the official compat suite 778/0, and carries no upstream blocker**,
+whereas the shipped vinext single-exec sits at **61 % compat blocked on upstream cloudflare/vinext#3197**
+(nitro-bun SSR-dispatch bug; no knext-side workaround — verified).
+
+**Status of the decision:** the "single target ONLY" choice (§Decision) is **NOT reversed by this
+amendment** — that is a founder re-decision, recorded as pending. This amendment records only that the
+empirical basis for it (cold start) is unsupported at the deployment layer, per the project's own
+"a discovered fact that invalidates the plan's premise is a reason to stop, not to quietly adjust"
+rule. **Recommendation for the re-decision:** treat node-standalone as the pragmatic ship target now
+(cold-tied, 778/0, unblocked); keep the vinext single-exec as a post-#3197 option chosen for image
+size / warm latency / single-artifact ops, not cold start. If cold start itself must improve, the
+lever is the Knative layer (min-scale, activator, image pull, probe timing), not the runtime.
