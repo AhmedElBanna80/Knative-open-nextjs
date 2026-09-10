@@ -82,16 +82,28 @@ const importMetaToCjs = {
             const before = (src.match(/import\.meta\.(url|filename|dirname)/g) ?? [])
                 .length;
             if (before === 0) return undefined;
+            // These must reconstruct the ORIGINAL entry path
+            // (<dirname(execPath)>/.output/server/index.mjs), NOT process.execPath
+            // itself. nitro's bun preset resolves public assets as
+            // `resolve(dirname(fileURLToPath(import.meta.url)), "../public")`;
+            // pointing import.meta.url at the BINARY — which sits beside .output/,
+            // not inside .output/server/ — makes "../public" climb one level too
+            // high and every `_next/static/*` asset 500s with ENOENT on
+            // `<parent>/public/…` (the "/tmp/public" bug, compat run 34441831428).
+            // Reconstructing the real entry path makes "../public" resolve to
+            // <root>/.output/public, where both the e2e build and the shipped
+            // Dockerfiles (`COPY .output/public`) place it. Binary and `.output/`
+            // are siblings by construction (e2e: ${APP_DIR}/knext-exec-e2e +
+            // ${APP_DIR}/.output; Docker: /app/server + /app/.output). Sharp is
+            // unaffected — it keys off process.execPath directly, not import.meta.
+            const P = 'require("node:path")';
+            const entryFileExpr = `(${P}.join(${P}.dirname(process.execPath),".output","server","index.mjs"))`;
+            const entryDirExpr = `(${P}.join(${P}.dirname(process.execPath),".output","server"))`;
+            const entryUrlExpr = `(require("node:url").pathToFileURL(${entryFileExpr}).href)`;
             const out = src
-                .replaceAll("import.meta.filename", "process.execPath")
-                .replaceAll(
-                    "import.meta.dirname",
-                    '(require("node:path").dirname(process.execPath))',
-                )
-                .replaceAll(
-                    "import.meta.url",
-                    '(require("node:url").pathToFileURL(process.execPath).href)',
-                );
+                .replaceAll("import.meta.filename", entryFileExpr)
+                .replaceAll("import.meta.dirname", entryDirExpr)
+                .replaceAll("import.meta.url", entryUrlExpr);
             const after = (out.match(/import\.meta/g) ?? []).length;
             if (after > 0) {
                 // Bytecode would fail anyway; failing here says WHY, and names
