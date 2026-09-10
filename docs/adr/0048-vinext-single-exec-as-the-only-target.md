@@ -209,3 +209,32 @@ Concretely:
   widened, operator taught the shape, CLI emits the resolved builder explicitly.
 - **Upgrade order is load-bearing (#548):** a CRD that predates `"vinext"` rejects the new CR
   under `--validate=strict` — loud, before the cluster is touched. Operator/CRD first, then CLI.
+
+## Amendment 4 — the single-exec unconditionally disables app↔proxy keep-alive reuse under Bun (2026-09-10)
+
+The shipped vinext single-exec serves over Bun's `Bun.serve` transport, and `Bun.serve` has the
+same class of keep-alive **socket-reuse reset** the node lane already mitigates: a client that
+reuses a keep-alive socket for an immediate back-to-back request gets the socket reset — `socket
+hang up`, no HTTP response, clean server log, ~1 ms. It is the `Bun.serve` sibling of the
+`node:http` reuse-reset the node-lane guard mitigates.
+
+**Decision:** the runtime **unconditionally disables app↔proxy HTTP keep-alive reuse under Bun** by
+stamping `Connection: close` on every response, via `bun-serve-keepalive-guard.mjs`. The guard is
+baked into the compiled entry (`vinext-compile.mjs` injects its import as the entry's first
+statement) and also `--preload`ed on the uncompiled diagnostic boot. Spec-honoring clients (undici,
+node-fetch, browsers, the Knative activator) then never reuse the socket, so the reuse race is
+unreachable. This trades keep-alive reuse on the `Bun.serve` path for correctness.
+
+**Why always-on, with no version ceiling.** Unlike the `node:http` reset — fixed at Bun 1.4.0, so
+the node-lane guard self-disables at ≥1.4.0 — the `Bun.serve` reset is **measured still-present at
+Bun 1.4.2 on linux-x64**. The upstream fix, and therefore any safe version ceiling, is unknown, so
+the guard carries none and is on whenever running under Bun. Upstream is tracked at
+oven-sh/bun#42212.
+
+**Lifting the ceiling is deliberate future work, not an oversight.** The guard should be made
+version-gated (or removed) **only after** a Bun release fixes the `Bun.serve` reuse reset and that
+fix is **re-measured on linux-x64** — the transport this reproduces on and darwin does not. Until
+then, treat the always-on stance as load-bearing correctness, not a conservative default.
+
+Escape hatch: `KNEXT_BUN_KEEPALIVE_GUARD=0` disables the guard outright (one switch covers both
+the `node:http` and `Bun.serve` transports).

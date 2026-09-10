@@ -583,14 +583,21 @@ async function main() {
     return `200 ${ct} ${res.bytes}B (source ${source.bytes}B)`;
   });
 
-  // (h) #188 — Bun keep-alive guard contract. Bun ≤1.3.14 resets a reused
-  // keep-alive socket when the next request arrives immediately after the
-  // previous response ("socket hang up" — 30/39 bun-lane compat failures; the
-  // exact race only fires under node-fetch@2's reuse timing, so asserting the
-  // MITIGATION's observable contract is the honest per-PR gate):
-  //   bun (affected version) → every response advertises `Connection: close`
-  //                            (the guard preload is active);
-  //   bun (fixed ≥1.4.0)     → guard self-disables, no requirement;
+  // (h) Bun keep-alive guard contract. Bun resets a reused keep-alive socket
+  // when the next request arrives immediately after the previous response
+  // ("socket hang up" — the dominant bun-lane compat failure cluster; the exact
+  // race only fires under linux-x64 reuse timing, so asserting the MITIGATION's
+  // observable contract — `Connection: close` — is the honest per-PR gate).
+  // There are TWO distinct transports and their fixes diverged:
+  //   compiled single-exec (Bun.serve transport) → the Bun.serve reset is
+  //                            MEASURED still-present at Bun 1.4.2, so the
+  //                            baked-in bun-serve keep-alive guard is ALWAYS on
+  //                            (no version ceiling) and every response MUST
+  //                            advertise `Connection: close`;
+  //   uncompiled bun (node:http transport) → the node:http reuse-reset was
+  //                            fixed at Bun 1.4.0, so the preloaded node:http
+  //                            guard SELF-DISABLES at ≥1.4.0 (Connection: close
+  //                            only required on an affected <1.4.0 bun);
   //   node                   → serving stays byte-identical: keep-alive intact,
   //                            NEVER `Connection: close`.
   await check('h. bun keep-alive guard contract (#188)', async () => {
@@ -607,19 +614,22 @@ async function main() {
       });
       if (RUNTIME === 'bun') {
         if (singleExec) {
-          // The compiled binary embeds bun >= 1.4 by construction — the
-          // vinext build REFUSES older (vinext-build.ts floor) — and no
-          // preload is loaded, so the contract here is simply "keep-alive
-          // intact". Probing the version is not an option: a --compile
-          // binary does NOT intercept --version (measured — argv reaches the
-          // app), so `SERVER_CMD --version` boots a SECOND server that
-          // collides on the metrics port or hangs forever.
-          assert.notStrictEqual(
+          // The compiled binary serves over the Bun.serve transport, whose
+          // keep-alive reuse-reset is MEASURED still-present at Bun 1.4.2 on
+          // linux-x64 — so vinext-compile.mjs bakes the always-on bun-serve
+          // keep-alive guard into the entry (no version ceiling). Every
+          // response MUST therefore advertise `Connection: close`. Probing the
+          // version is not an option: a --compile binary does NOT intercept
+          // --version (measured — argv reaches the app), so `SERVER_CMD
+          // --version` boots a SECOND server that collides on the metrics port
+          // or hangs forever — and it would be moot anyway, the guard is on
+          // regardless of version.
+          assert.strictEqual(
             res.connection,
             'close',
-            'single-exec serving must stay keep-alive — the embedded bun is >= 1.4 and no guard loads',
+            'single-exec serving must stamp Connection: close — the baked-in bun-serve keep-alive guard is always on (the Bun.serve reset is unfixed as of Bun 1.4.2)',
           );
-          return `single-exec: keep-alive intact (embedded bun >= 1.4 by build floor)`;
+          return `single-exec: guard active, Connection: close`;
         }
         if (!BUN_GUARD_PRELOAD) {
           throw new Error('bun-keepalive-guard preload not found in the workspace');

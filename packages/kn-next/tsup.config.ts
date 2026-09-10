@@ -87,6 +87,13 @@ export default defineConfig([
       // `kn-next build`, not imported, because it needs `Bun.build` plugins and
       // the published CLI runs under node.
       'adapters/vinext-compile': 'src/adapters/vinext-compile.mjs',
+      // The Bun.serve keep-alive guard (the vinext-lane sibling of the node
+      // #188 guard). vinext-compile injects an `import` of this as the compiled
+      // entry's first statement, and the uncompiled diagnostic boot `bun
+      // --preload`s it — both need it shipped in dist beside vinext-compile.
+      // Bun-only ESM, dependency-free like cache-handler; no `.d.ts`.
+      'adapters/bun-serve-keepalive-guard':
+        'src/adapters/bun-serve-keepalive-guard.mjs',
       // The vinext data-cache adapter FACTORY (#953) — the scaffold's
       // vite.config hands this subpath to `vinext({ cache: { data } })`, and
       // vinext's generated registration module imports it at the app's build
