@@ -27,11 +27,11 @@ const adapterSource = readFileSync(
 );
 
 describe("in-repo next devDependency (#171 follow-up)", () => {
-    it("pins next 16.2.x so the typed ctx.routing exists locally", () => {
+    it("pins next 16.3.x so the typed ctx.routing exists locally", () => {
         const pkg = JSON.parse(
             readFileSync(join(pkgDir, "package.json"), "utf8"),
         );
-        expect(pkg.devDependencies.next).toMatch(/^16\.2\./);
+        expect(pkg.devDependencies.next).toMatch(/^16\.3\./);
         // The public contract does NOT move: 16.0.x consumers stay supported.
         expect(pkg.peerDependencies.next).toBe(">=16.0.0");
     });

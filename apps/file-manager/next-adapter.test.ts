@@ -31,7 +31,7 @@ let __adapterGen = 0;
 type AdapterModule = typeof import('./next-adapter.js');
 type OnBuildCompleteCtx = Parameters<NonNullable<AdapterModule['default']['onBuildComplete']>>[0];
 
-// Minimal 16.2-shaped `routing` block so fixtures satisfy the current ctx type
+// Minimal 16.3-shaped `routing` block (16.3 added required `middlewareMatchers`) so fixtures satisfy the current ctx type
 // (16.2 dropped `routes` and made `routing` required). The legacy-`routes` counting
 // branch in the adapter takes precedence when a fixture also carries `routes`, so
 // the legacy-count assertions below still exercise the branch they always did.
@@ -39,6 +39,7 @@ type OnBuildCompleteCtx = Parameters<NonNullable<AdapterModule['default']['onBui
 // asserting an empty object keeps the fixture free of next-internal imports.
 const emptyRouting: OnBuildCompleteCtx['routing'] = {
   beforeMiddleware: [],
+  middlewareMatchers: [],
   beforeFiles: [],
   afterFiles: [],
   dynamicRoutes: [],
