@@ -63,7 +63,7 @@ const DEPLOY_SCRIPT = 'scripts/e2e-deploy-vinext.sh';
  * bumps, re-run `npm view vinext@<v> peerDependencies` and update BOTH the ranges
  * and PEER_VINEXT_VERSION below.
  */
-const PEER_VINEXT_VERSION = '1.0.0-beta.8';
+const PEER_VINEXT_VERSION = '1.0.0-beta.9';
 const VINEXT_PEER_RANGES: Record<string, string> = {
   vite: '^8.0.0',
   react: '^19.2.6',
