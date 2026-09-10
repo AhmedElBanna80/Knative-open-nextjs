@@ -586,3 +586,38 @@ describe('summarize() carries the builder axis', () => {
     expect(Object.prototype.hasOwnProperty.call(s, 'builder')).toBe(false);
   });
 });
+
+describe('the lane restores fixture-shipped node_modules the toolchain reify prunes', () => {
+  // Fixtures like `app-dir/next-config-ts/import-from-node-modules` ship
+  // `node_modules/cjs` + `node_modules/esm` and import them from next.config.ts.
+  // The toolchain `npm install` reifies an ideal tree and PRUNES them
+  // ("removed N packages"), so the config load fails with `Cannot find module
+  // 'cjs'` and the fixture reds at build. The node lane already snapshots them
+  // before its install and restores what the reify removed; the vinext lane must
+  // too. Assert BOTH halves AND the ordering — removing either half, or moving
+  // the restore before the install, reds this guard.
+  const src = code(DEPLOY_SCRIPT);
+  const iSnap = src.indexOf('NM_SNAP="$(mktemp');
+  const iInstall = src.search(/npm\s+install\s+--no-audit[\s\S]*?vinext@/);
+  const iRestore = src.indexOf('cp -RP "${NM_SNAP}/${entry}" "${NM_DIR}');
+
+  it('snapshots the fixture node_modules BEFORE the toolchain install', () => {
+    expect(src).toContain('nm_package_entries');
+    expect(iSnap, 'no NM_SNAP snapshot in the lane').toBeGreaterThan(-1);
+    expect(iInstall, 'could not locate the toolchain npm install').toBeGreaterThan(-1);
+    expect(
+      iSnap < iInstall,
+      'the node_modules snapshot must run BEFORE the toolchain install (else it captures the pruned tree)',
+    ).toBe(true);
+  });
+
+  it('restores only the entries the reify pruned, AFTER the install', () => {
+    expect(iRestore, 'no restore of pruned fixture packages after the install').toBeGreaterThan(-1);
+    expect(
+      iRestore > iInstall,
+      'the restore must run AFTER the toolchain install (that is what prunes them)',
+    ).toBe(true);
+    // Guarded restore: only copy back an entry the reify actually removed.
+    expect(src).toMatch(/if \[ ! -e "\$\{NM_DIR\}\/\$\{entry\}" \]/);
+  });
+});

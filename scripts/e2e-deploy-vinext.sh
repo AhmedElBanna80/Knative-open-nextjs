@@ -124,6 +124,44 @@ SASS_VERSION="${KNEXT_SASS_VERSION:-1.104.0}"
 # shard count, summary and ledger are identical; only the artifact under test moves.
 KNEXT_COMPILE="${KNEXT_COMPILE:-1}"
 
+# ── B3 port from the node lane (scripts/e2e-deploy.sh, #147): some fixtures ship
+# hand-made packages INSIDE their own node_modules/ as test material — e.g.
+# `app-dir/next-config-ts/import-from-node-modules` ships `node_modules/cjs` +
+# `node_modules/esm` and its `next.config.ts` imports them. The toolchain
+# `npm install` below reifies an ideal tree and PRUNES every fixture package not
+# in it (the run log shows "removed N packages"), so the config load then fails
+# with `Cannot find module 'cjs'` and the whole fixture reds at build. The node
+# lane already snapshots these before its install and restores what the reify
+# removed; port the same here. Snapshot package-level entries now; restore after.
+NM_DIR="${APP_DIR}/node_modules"
+NM_SNAP=""
+NM_ENTRIES=""
+nm_package_entries() { # <node_modules dir> → package-level entries, one per line
+  (
+    cd "$1" 2>/dev/null || exit 0
+    for e in * @*/*; do
+      if [ -e "${e}" ] || [ -L "${e}" ]; then
+        case "${e}" in
+          @*/*) echo "${e}" ;; # scoped package (scope children pruned individually)
+          @*) : ;;             # bare scope dir — children emitted by the @*/* glob
+          *) echo "${e}" ;;
+        esac
+      fi
+    done
+  )
+}
+if [ -d "${NM_DIR}" ]; then
+  NM_SNAP="$(mktemp -d "${APP_DIR}/.knext-nm-snap.XXXXXX")"
+  NM_ENTRIES="$(nm_package_entries "${NM_DIR}")"
+  while IFS= read -r entry; do
+    [ -n "${entry}" ] || continue
+    mkdir -p "${NM_SNAP}/$(dirname "${entry}")"
+    cp -RP "${NM_DIR}/${entry}" "${NM_SNAP}/${entry}" # -RP: preserve symlinks
+  done <<EOF
+${NM_ENTRIES}
+EOF
+fi
+
 log "installing knext tarballs + the pinned vinext toolchain (vinext@${VINEXT_VERSION}, vite@${VITE_VERSION}, nitro@${NITRO_VERSION}, react@${REACT_VERSION})"
 npm install --no-audit --no-fund --loglevel=error \
   "${LIB_TGZ}" "${DB_TGZ}" "${CORE_TGZ}" \
@@ -135,6 +173,21 @@ npm install --no-audit --no-fund --loglevel=error \
   "react-dom@${REACT_VERSION}" \
   "react-server-dom-webpack@${REACT_VERSION}" \
   "sass@${SASS_VERSION}" >&2
+
+# Restore fixture-shipped node_modules packages the reify pruned (B3 port; see above).
+if [ -n "${NM_SNAP}" ]; then
+  while IFS= read -r entry; do
+    [ -n "${entry}" ] || continue
+    if [ ! -e "${NM_DIR}/${entry}" ] && [ ! -L "${NM_DIR}/${entry}" ]; then
+      log "restoring fixture-shipped node_modules/${entry} (pruned by npm install reify)"
+      mkdir -p "${NM_DIR}/$(dirname "${entry}")"
+      cp -RP "${NM_SNAP}/${entry}" "${NM_DIR}/${entry}"
+    fi
+  done <<EOF
+${NM_ENTRIES}
+EOF
+  rm -rf "${NM_SNAP}"
+fi
 
 # ── 3. the vite config vinext builds through ──────────────────────────────────
 # Written only when the fixture has none: a fixture that ships its own vite
