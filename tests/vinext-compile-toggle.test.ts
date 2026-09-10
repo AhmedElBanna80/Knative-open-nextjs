@@ -91,7 +91,9 @@ describe('KNEXT_COMPILE=0 boots the UNCOMPILED nitro output under bun; the defau
   it('boots the uncompiled nitro entry (NITRO_ENTRY) under bun, exactly once', () => {
     // The mutation this catches: removing the uncompiled boot (so KNEXT_COMPILE=0
     // has nothing to boot). NITRO_ENTRY is the `.output/server/index.mjs` path.
-    const boots = codeLines().filter((l) => /exec bun "\$\{NITRO_ENTRY\}"/.test(l));
+    // Tolerates the keepalive-guard `--preload` (#1041): the boot is still a
+    // single `exec bun … "${NITRO_ENTRY}"`, now with an optional preload flag.
+    const boots = codeLines().filter((l) => /exec bun\b.*"\$\{NITRO_ENTRY\}"/.test(l));
     expect(boots.length, 'exactly one uncompiled bun boot of NITRO_ENTRY').toBe(1);
     // NITRO_ENTRY must actually be the uncompiled nitro output — the whole point.
     // biome-ignore lint/suspicious/noTemplateCurlyInString: asserts LITERAL shell text; ${APP_DIR} is a shell var, not a JS placeholder
@@ -102,7 +104,7 @@ describe('KNEXT_COMPILE=0 boots the UNCOMPILED nitro output under bun; the defau
     // Ordering proof that the uncompiled boot is the KNEXT_COMPILE=0 branch, not a
     // second unconditional boot: gate → … → else → uncompiled boot, all in order.
     const lines = codeLines();
-    const uncompiledIdx = firstIndex(lines, /exec bun "\$\{NITRO_ENTRY\}"/);
+    const uncompiledIdx = firstIndex(lines, /exec bun\b.*"\$\{NITRO_ENTRY\}"/);
     expect(uncompiledIdx).toBeGreaterThanOrEqual(0);
     // The nearest gate + else above the uncompiled boot.
     const before = lines.slice(0, uncompiledIdx);
