@@ -38,7 +38,7 @@
       "dependencies": {
         "@getknext/db": "workspace:*",
         "@getknext/lib": "workspace:*",
-        "next": "16.2.11",
+        "next": "16.3.3",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
       },
@@ -59,11 +59,11 @@
         "fumadocs-core": "^16.0.0",
         "fumadocs-mdx": "^15.0.12",
         "fumadocs-ui": "^16.0.0",
-        "next": "^16.2.11",
+        "next": "^16.3.3",
         "prom-client": "^15.1.3",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
-        "sharp": "^0.35.2",
+        "sharp": "^0.35.4",
         "srvx": "0.11.22",
         "vinext": "1.0.0-beta.8",
       },
@@ -130,7 +130,7 @@
       "name": "spike-bun-bytecode",
       "version": "0.1.0",
       "dependencies": {
-        "next": "16.2.11",
+        "next": "16.3.3",
         "react": "19.2.5",
         "react-dom": "19.2.5",
       },
@@ -189,7 +189,7 @@
         "@vitest/coverage-v8": "^4.0.18",
         "bun-types": "^1.3.9",
         "esbuild": "^0.28.0",
-        "next": "16.2.11",
+        "next": "16.3.3",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "vinext": "1.0.0-beta.8",
@@ -280,7 +280,6 @@
     "nanoid@3": {
       ".": ">=3.3.17 <4",
     },
-    "next": ">=16.3.3 <17",
     "picomatch@2": {
       ".": ">=2.3.2 <3",
     },
