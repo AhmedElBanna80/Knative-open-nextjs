@@ -58,6 +58,11 @@ on:
         required: false
         type: string
         default: '1.4.0'
+      compile:
+        description: 'DIAGNOSTIC: 1 = ship the compiled single-exec (default, the real artifact); 0 = boot the UNCOMPILED nitro output under bun, to partition compile-step bugs from runtime/vite bugs. Do not merge a 0 default.'
+        required: false
+        type: string
+        default: '1'
   schedule:
     # 07:17 UTC Sunday — weekly, and deliberately NOT nightly: the axis is new,
     # its number will move on knext/vinext changes rather than nightly noise, and
@@ -663,6 +668,10 @@ jobs:
           NEXT_E2E_TEST_TIMEOUT: '240000'
           # THE axis. Everything else on this line is the node lane's.
           NEXT_TEST_DEPLOY_SCRIPT_PATH: ${{ github.workspace }}/knext/scripts/e2e-deploy-vinext.sh
+          # DIAGNOSTIC partition (default '1' = compiled, unchanged): '0' boots the
+          # uncompiled nitro output so a runtime red can be attributed to the
+          # compile step vs the vite/nitro runtime. The deploy script reads this.
+          KNEXT_COMPILE: ${{ github.event.inputs.compile || '1' }}
           NEXT_TEST_DEPLOY_LOGS_SCRIPT_PATH: ${{ github.workspace }}/knext/scripts/e2e-logs.sh
           NEXT_TEST_CLEANUP_SCRIPT_PATH: ${{ github.workspace }}/knext/scripts/e2e-cleanup.sh
           KNEXT_E2E_TARBALLS_DIR: ${{ github.workspace }}/knext-tarballs
