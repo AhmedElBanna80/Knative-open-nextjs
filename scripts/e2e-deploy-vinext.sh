@@ -250,6 +250,14 @@ import vinext from 'vinext';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  resolve: {
+    // Strip the webpack/sass-loader '~' CSS-import prefix so vite resolves
+    // '~pkg/foo.css' as the bare 'pkg/foo.css' from node_modules. Next's webpack
+    // build honours '~'; vite does not, so without this a fixture that does
+    // '@import "~nprogress/nprogress.css"' dies with '[postcss] ENOENT open
+    // ~nprogress/nprogress.css'. Inert unless an import starts with '~'.
+    alias: [{ find: /^~/, replacement: '' }],
+  },
   plugins: [
 ${MDX_PLUGIN}
     vinext(),

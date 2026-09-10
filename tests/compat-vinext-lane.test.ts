@@ -454,6 +454,24 @@ describe('the lane resolves the deploy/build-time fixture failures it can (lane 
     );
   });
 
+  it('resolves the webpack `~pkg` CSS-import convention in the generated vite.config.mjs', () => {
+    // A Next fixture may `@import '~nprogress/nprogress.css'` — the webpack/
+    // sass-loader `~` = "resolve from node_modules" convention. Next's webpack
+    // build honours it; vite/rolldown does not, so the lane's build dies with
+    // `[postcss] ENOENT … open '~nprogress/nprogress.css'`. A knext-vinext app
+    // that used `~` imports would carry the same one-line resolve.alias — knext
+    // does not emit the vite config (the CLI tells the user to bring their own,
+    // vinext-build.ts), so this is userland config the lane stands in for, the
+    // SAME class as the bun preset and the mdx() plugin, NOT a fixture-source
+    // mutation. Inert unless an import starts with `~`. Assert the generated
+    // config strips the leading `~` so vite resolves the bare specifier.
+    const e = executable();
+    expect(
+      e,
+      'the generated vite config must alias a leading `~` to the bare node_modules specifier',
+    ).toMatch(/find:\s*\/\^~\/[\s\S]*replacement:\s*["']["']/);
+  });
+
   it('renames a CommonJS next.config.js → next.config.cjs, in CODE not prose (next-config fixture)', () => {
     // The forced `type:module` (normalization (b)) makes node read a `.js`
     // next.config as ESM, breaking a fixture whose config uses `module.exports`
