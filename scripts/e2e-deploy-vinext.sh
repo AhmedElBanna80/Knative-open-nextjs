@@ -99,6 +99,15 @@ PLUGIN_RSC_VERSION="${KNEXT_PLUGIN_RSC_VERSION:-0.5.34}"
 # whole family at the version vinext's RSC transform was built against keeps the
 # runtime coherent, which `--legacy-peer-deps` (accept-and-skew) would not.
 REACT_VERSION="${KNEXT_REACT_VERSION:-19.2.6}"
+# The `app-dir/scss` fixtures (29 in the v16.2.0 window) ship `sass@1.54.0` —
+# Next.js's own pin — but the toolchain's `vite@8.2.2` declares
+# `peerOptional sass@^1.70.0`, and 1.54.0 does NOT satisfy it. Without a coherent
+# pin, `npm install` aborts with `Conflicting peer dependency: sass` (ERESOLVE)
+# before the fixture builds, reddening every scss fixture as an INSTALL artifact
+# rather than a real vinext SCSS result. The node lane never hits this (it pulls
+# no vite). Pinned at a version satisfying BOTH next@16.2's `^1.3.0` and vite@8's
+# `^1.70.0` — same discipline as the React family above, NOT `--legacy-peer-deps`.
+SASS_VERSION="${KNEXT_SASS_VERSION:-1.104.0}"
 
 # ── the compile toggle (diagnostic opt-in; DEFAULT = 1 = compiled) ─────────────
 # The shipped-artifact lane boots the COMPILED single executable, and that is the
@@ -124,7 +133,8 @@ npm install --no-audit --no-fund --loglevel=error \
   "@vitejs/plugin-rsc@${PLUGIN_RSC_VERSION}" \
   "react@${REACT_VERSION}" \
   "react-dom@${REACT_VERSION}" \
-  "react-server-dom-webpack@${REACT_VERSION}" >&2
+  "react-server-dom-webpack@${REACT_VERSION}" \
+  "sass@${SASS_VERSION}" >&2
 
 # ── 3. the vite config vinext builds through ──────────────────────────────────
 # Written only when the fixture has none: a fixture that ships its own vite

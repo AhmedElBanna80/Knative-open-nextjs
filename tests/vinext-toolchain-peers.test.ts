@@ -72,6 +72,22 @@ const VINEXT_PEER_RANGES: Record<string, string> = {
   'react-server-dom-webpack': '^19.2.6',
 };
 
+/**
+ * The scss/sass fixtures ship `sass@1.54.0` (Next.js's own pin), but the vinext
+ * toolchain's `vite@8.2.2` declares `peerOptional sass@^1.70.0`. 1.54.0 does NOT
+ * satisfy `^1.70.0`, so the toolchain `npm install` aborts with
+ * `npm error Conflicting peer dependency: sass` (ERESOLVE) before the fixture
+ * builds — reddening every `app-dir/scss` fixture (29 in the v16.2.0 window) as an
+ * INSTALL artifact, not a real vinext SCSS incompatibility. The lane must pin
+ * `sass` at a version satisfying BOTH `next@16.2`'s `^1.3.0` and `vite@8`'s
+ * `^1.70.0` peers. Same class as the react/plugin-rsc edges above; evidence in
+ * compat run 34434002596 shard logs (`peerOptional sass@"^1.70.0" from vite@8.2.2`).
+ */
+const SASS_PEER_RANGES: Record<string, string> = {
+  next: '^1.3.0',
+  vite: '^1.70.0',
+};
+
 /** Script body with full-line comments removed — a prose mention in the header
  *  must not satisfy an assertion about the executable install command. */
 function code(): string {
@@ -209,6 +225,28 @@ describe('the vinext toolchain install satisfies every vinext peer', () => {
     const install = toolchainInstall();
     expect(install).not.toContain('--legacy-peer-deps');
     expect(install).not.toContain('--force');
+  });
+
+  it('pins sass so the scss fixtures install (vite@8 peer sass@^1.70.0)', () => {
+    // The scss fixtures ship sass@1.54.0; vite@8.2.2 needs sass@^1.70.0. Without
+    // a lane pin, npm ERESOLVE aborts every scss fixture install before it builds.
+    expect(
+      pinnedVersion('sass'),
+      'sass is unpinned — the app-dir/scss fixtures ship sass@1.54.0, which does ' +
+        'not satisfy vite@8’s peerOptional sass@^1.70.0; npm ERESOLVE aborts every ' +
+        'scss fixture install before it can build (29 fixtures in the v16.2.0 window)',
+    ).toBeDefined();
+  });
+
+  it('pins sass at a version satisfying BOTH next and vite peer ranges', () => {
+    const version = pinnedVersion('sass');
+    for (const [pkg, range] of Object.entries(SASS_PEER_RANGES)) {
+      expect(
+        caretSatisfies(version as string, range),
+        `sass@${version} does NOT satisfy ${pkg}’s peer sass@"${range}" — the ` +
+          'scss fixture install will still ERESOLVE',
+      ).toBe(true);
+    }
   });
 
   it('sanity: the caret-satisfaction helper is not vacuously true', () => {
