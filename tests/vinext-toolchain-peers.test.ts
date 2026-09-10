@@ -249,6 +249,59 @@ describe('the vinext toolchain install satisfies every vinext peer', () => {
     }
   });
 
+  it('pins @babel/plugin-transform-runtime on the 7.x line (the babel fixture ERESOLVE)', () => {
+    // The `babel` fixture ships @babel/preset-flow@7.25.9, whose peer is
+    // @babel/core@^7.0.0-0. The vinext toolchain's @vitejs/plugin-react →
+    // @rolldown/plugin-babel chain pulls @babel/plugin-transform-runtime@8.0.1
+    // (peer @babel/core@^8.0.0) as an optional peer, so npm cannot satisfy
+    // @babel/core (7 vs 8) and every install aborts with `npm ERESOLVE`
+    // (`Conflicting peer dependency: @babel/core@8.0.1`, compat run 34473981569
+    // shard 12). @rolldown/plugin-babel@0.2.4's peerOptional range is
+    // `^7.29.0 || ^8.0.0-rc.1`, so pinning transform-runtime on the 7.x line
+    // satisfies rolldown AND aligns @babel/core@7 with preset-flow — same class
+    // as the sass/plugin-rsc pins, NOT --legacy-peer-deps.
+    const version = pinnedVersion('@babel/plugin-transform-runtime');
+    expect(
+      version,
+      '@babel/plugin-transform-runtime is unpinned — the babel fixture ERESOLVEs on ' +
+        'the @babel/core 7-vs-8 conflict before it can build',
+    ).toBeDefined();
+    expect(
+      caretSatisfies(version as string, '^7.29.0'),
+      `@babel/plugin-transform-runtime@${version} is not on the 7.x line satisfying ` +
+        "@rolldown/plugin-babel's peer `^7.29.0` — the babel/core 7-vs-8 ERESOLVE returns",
+    ).toBe(true);
+  });
+
+  it('pins a TypeScript loader (tsx/jiti) for postcss.config.ts fixtures', () => {
+    // The `postcss-config-ts` fixture ships a `postcss.config.ts`; loading it
+    // needs a TS loader or the build dies with `'tsx' or 'jiti' is required for
+    // the TypeScript configuration files` (compat run 34473981569 shard 11).
+    // The node lane never hits this — postcss under next resolves it — but the
+    // vite toolchain has no TS loader unless the lane installs one.
+    const tsx = pinnedVersion('tsx');
+    const jiti = pinnedVersion('jiti');
+    expect(
+      tsx ?? jiti,
+      'neither tsx nor jiti is pinned — postcss.config.ts fixtures fail to build with ' +
+        "`'tsx' or 'jiti' is required for the TypeScript configuration files`",
+    ).toBeDefined();
+  });
+
+  it('pins @mdx-js/rollup so mdx fixtures compile their .mdx modules', () => {
+    // vinext does not bundle an MDX loader: an app with `.mdx` modules needs
+    // @mdx-js/rollup registered in the vite config, or the build dies with
+    // `[vinext] Encountered MDX module … but no MDX plugin is configured`
+    // (compat run 34473981569 shard 11/12). The plugin is registered in the
+    // generated vite.config.mjs (guarded in compat-vinext-lane.test.ts); it
+    // must also be INSTALLED, or that import throws.
+    expect(
+      pinnedVersion('@mdx-js/rollup'),
+      '@mdx-js/rollup is unpinned — the generated vite config imports it, so mdx ' +
+        'fixtures (and any generated-config fixture) fail to build without it installed',
+    ).toBeDefined();
+  });
+
   it('sanity: the caret-satisfaction helper is not vacuously true', () => {
     // Guards the guard — if caretSatisfies always returned true the peer check
     // above would be decoration.

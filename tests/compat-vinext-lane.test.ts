@@ -318,7 +318,7 @@ describe('the lane measures the COMPILED BINARY, not the uncompiled nitro output
 
 describe('fixture normalization is EXPLICIT and bounded to the ESM app contract — not softening', () => {
   // The lane's honesty rests on measuring the fixture, changed only in the ways
-  // a knext-vinext user's own app is already shaped. Two normalizations are
+  // a knext-vinext user's own app is already shaped. Three normalizations are
   // legitimate and NO MORE:
   //   (a) the per-fixture `vite.config.mjs` injection (already asserted above), and
   //   (b) merging `"type":"module"` into the fixture's package.json — knext's
@@ -326,6 +326,14 @@ describe('fixture normalization is EXPLICIT and bounded to the ESM app contract 
   //       vinext build assumes ESM, so this is normalization-to-contract, the SAME
   //       class as (a). It is NOT softening: a CommonJS-app limitation is a tracked,
   //       separate gap and this axis's compat claim is scoped to ESM apps.
+  //   (c) renaming a CommonJS `next.config.js` → `next.config.cjs` — a direct
+  //       consequence of (b): the forced `"type":"module"` makes node read a `.js`
+  //       config as ESM, breaking a fixture whose config uses `module.exports`.
+  //       vinext resolves `next.config.cjs` and a `.cjs` file is CommonJS
+  //       regardless of package `type`, so the rename RECONCILES the CJS config
+  //       with the ESM app contract without weakening it. It renames a config
+  //       file, touches no app/test source, and is gated on a CJS marker — the
+  //       SAME class as (a)/(b), asserted positively and bounded below.
   // Anything BROADER — deleting failing test/spec files, rewriting fixture source,
   // narrowing the manifest — is softening the number, and must red here.
   const script = () => read(DEPLOY_SCRIPT);
@@ -414,6 +422,63 @@ describe('fixture normalization is EXPLICIT and bounded to the ESM app contract 
     // (4) The deploy script must NOT touch the shared corpus manifest — narrowing
     // it here would inflate the number while still looking like the node lane's.
     expect(e, 'the deploy script never references the corpus manifest').not.toMatch(/manifest/i);
+  });
+});
+
+describe('the lane resolves the deploy/build-time fixture failures it can (lane fidelity)', () => {
+  // Five corpus fixtures fail at INSTALL/BUILD time in the vinext lane — not at
+  // vinext runtime — because the knext toolchain install or the generated config
+  // is missing something the node lane gets for free. Each guard below asserts the
+  // lane DOES the concrete thing that recovers a fixture, comment-stripped so a
+  // prose mention never satisfies it. (The babel + tsx installs are asserted in
+  // vinext-toolchain-peers.test.ts; here we guard the two config-shaped fixes.)
+  const script = () => read(DEPLOY_SCRIPT);
+  const executable = () =>
+    script()
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+
+  it('registers @mdx-js/rollup in the generated vite.config.mjs (mdx fixtures)', () => {
+    // vinext ships no MDX loader, so an app with `.mdx` modules needs
+    // @mdx-js/rollup registered in the vite config or the build dies with
+    // `[vinext] Encountered MDX module … but no MDX plugin is configured`.
+    // Assert the generated config both IMPORTS the plugin and PLACES it in the
+    // plugins array — an import with no plugin entry is a no-op.
+    const e = executable();
+    expect(e, 'the generated vite config imports @mdx-js/rollup').toMatch(
+      /import\s+mdx\s+from\s+["']@mdx-js\/rollup["']/,
+    );
+    expect(e, 'and registers mdx() as a vite plugin, enforced pre so .mdx compiles first').toMatch(
+      /\.\.\.mdx\(\)/,
+    );
+  });
+
+  it('renames a CommonJS next.config.js → next.config.cjs, in CODE not prose (next-config fixture)', () => {
+    // The forced `type:module` (normalization (b)) makes node read a `.js`
+    // next.config as ESM, breaking a fixture whose config uses `module.exports`
+    // (`require is not defined in ES module scope`). The lane renames the CJS
+    // config to `.cjs` — which vinext resolves and node always treats as CJS.
+    const lines = script()
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'));
+    const renames = lines.filter((l) =>
+      /\bmv\b[^\n]*next\.config\.js[^\n]*next\.config\.cjs/.test(l),
+    );
+    expect(renames.length, 'the lane must rename a CJS next.config.js to .cjs exactly once').toBe(
+      1,
+    );
+  });
+
+  it('gates the next.config.js rename on a CJS marker — an ESM config is never renamed', () => {
+    // Unconditionally renaming would corrupt an ESM `next.config.js` (which loads
+    // fine under type:module). The rename must be guarded by a CommonJS marker
+    // (`module.exports`), so only a genuinely-CJS config is reconciled.
+    const e = executable();
+    expect(
+      e,
+      'the .cjs rename must be gated on a module.exports CJS marker, not applied blindly',
+    ).toMatch(/module\\?\.exports/);
   });
 });
 

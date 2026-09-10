@@ -108,6 +108,28 @@ REACT_VERSION="${KNEXT_REACT_VERSION:-19.2.6}"
 # no vite). Pinned at a version satisfying BOTH next@16.2's `^1.3.0` and vite@8's
 # `^1.70.0` — same discipline as the React family above, NOT `--legacy-peer-deps`.
 SASS_VERSION="${KNEXT_SASS_VERSION:-1.104.0}"
+# The `babel` fixture ships `@babel/preset-flow@7.25.9` (peer `@babel/core@^7.0.0-0`).
+# The toolchain's `@vitejs/plugin-react` → `@rolldown/plugin-babel@0.2.4` chain pulls
+# `@babel/plugin-transform-runtime@8.0.1` (peer `@babel/core@^8.0.0`) as an optional
+# peer, so npm cannot satisfy `@babel/core` (7 vs 8) and every fixture install aborts
+# with `npm ERESOLVE` (`Conflicting peer dependency: @babel/core@8.0.1`, compat run
+# 34473981569 shard 12). `@rolldown/plugin-babel`'s peerOptional range is
+# `^7.29.0 || ^8.0.0-rc.1`, so pinning transform-runtime on the 7.x line satisfies
+# rolldown AND aligns `@babel/core@7` with preset-flow — same discipline as the
+# sass/react pins above, NOT `--legacy-peer-deps`. Verified: `npm install --dry-run`
+# resolves `@babel/core@7.29.7` with this pin; without it, ERESOLVE.
+BABEL_TRANSFORM_RUNTIME_VERSION="${KNEXT_BABEL_TRANSFORM_RUNTIME_VERSION:-7.29.7}"
+# The `postcss-config-ts` fixture ships a `postcss.config.ts`; vite/postcss loads a
+# TypeScript config only when a TS loader is resolvable, else the build dies with
+# `'tsx' or 'jiti' is required for the TypeScript configuration files` (compat run
+# 34473981569 shard 11). The node lane never hits this — next resolves the TS config
+# itself — so the vite toolchain has to install the loader.
+TSX_VERSION="${KNEXT_TSX_VERSION:-4.23.13}"
+# vinext ships no MDX loader: a fixture with `.mdx` modules needs `@mdx-js/rollup`
+# registered in the vite config (done in §3 below) AND installed, or the build dies
+# with `[vinext] Encountered MDX module … but no MDX plugin is configured` (compat
+# run 34473981569 shards 11/12).
+MDX_ROLLUP_VERSION="${KNEXT_MDX_ROLLUP_VERSION:-3.1.1}"
 
 # ── the compile toggle (diagnostic opt-in; DEFAULT = 1 = compiled) ─────────────
 # The shipped-artifact lane boots the COMPILED single executable, and that is the
@@ -172,7 +194,10 @@ npm install --no-audit --no-fund --loglevel=error \
   "react@${REACT_VERSION}" \
   "react-dom@${REACT_VERSION}" \
   "react-server-dom-webpack@${REACT_VERSION}" \
-  "sass@${SASS_VERSION}" >&2
+  "sass@${SASS_VERSION}" \
+  "@babel/plugin-transform-runtime@${BABEL_TRANSFORM_RUNTIME_VERSION}" \
+  "tsx@${TSX_VERSION}" \
+  "@mdx-js/rollup@${MDX_ROLLUP_VERSION}" >&2
 
 # Restore fixture-shipped node_modules packages the reify pruned (B3 port; see above).
 if [ -n "${NM_SNAP}" ]; then
@@ -203,13 +228,30 @@ VITE_CONFIG="${APP_DIR}/vite.config.mjs"
 if [ -e "${APP_DIR}/vite.config.ts" ] || [ -e "${APP_DIR}/vite.config.js" ] || [ -e "${VITE_CONFIG}" ]; then
   log "fixture ships its own vite config — using it verbatim"
 else
-  cat >"${VITE_CONFIG}" <<'VITECONFIG'
+  # vinext ships no built-in MDX loader, so a fixture whose app/pages import `.mdx`
+  # modules fails to build with `[vinext] Encountered MDX module … but no MDX plugin
+  # is configured` unless `@mdx-js/rollup` is registered here. Gated on the fixture
+  # actually shipping `.mdx` files (vinext's own hasMdxFiles heuristic) so non-mdx
+  # fixtures are unaffected; `enforce: 'pre'` runs the MDX transform before vinext's
+  # RSC pipeline sees the module.
+  MDX_IMPORT=""
+  MDX_PLUGIN=""
+  if find "${APP_DIR}" -type d -name node_modules -prune -o -type f -name '*.mdx' -print 2>/dev/null | grep -q .; then
+    MDX_IMPORT="import mdx from '@mdx-js/rollup';"
+    MDX_PLUGIN="    { enforce: 'pre', ...mdx() },"
+    log "fixture ships .mdx modules — registering @mdx-js/rollup in the vite config"
+  fi
+  # NOTE: unquoted heredoc so ${MDX_IMPORT}/${MDX_PLUGIN} expand. The config body
+  # itself carries no `$`, so nothing else is subject to expansion.
+  cat >"${VITE_CONFIG}" <<VITECONFIG
+${MDX_IMPORT}
 import { nitro } from 'nitro/vite';
 import vinext from 'vinext';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [
+${MDX_PLUGIN}
     vinext(),
     nitro({
       preset: 'bun',
@@ -249,6 +291,24 @@ if [ -f "${FIXTURE_PKG}" ]; then
   log "normalized ${FIXTURE_PKG} to \"type\":\"module\" (knext-vinext ESM app contract)"
 else
   log "no package.json in fixture — skipping ESM normalization"
+fi
+
+# ── 3b-ii. reconcile a CommonJS next.config.js with the forced ESM app contract ─
+# The §3b `"type":"module"` merge makes node treat a `.js` next.config as ESM, so a
+# fixture shipping a CommonJS `next.config.js` (`module.exports`, top-level
+# `require`) then fails the vite build with `require is not defined in ES module
+# scope` (compat run 34473981569 shard 1, app-dir/next-config). vinext's config
+# loader resolves `next.config.cjs` (it is in vinext's CONFIG_FILES list) and a
+# `.cjs` file is CommonJS regardless of the package `type`, so renaming the CJS
+# config to `.cjs` loads it correctly WITHOUT weakening the ESM app contract the
+# rest of the corpus relies on. This is config normalization-to-contract, the same
+# class as the vite.config.mjs write and the type:module merge — it renames a config
+# file, touches no app/test source, and is GATED on a `module.exports` CJS marker so
+# an ESM `next.config.js` is never renamed.
+NEXT_CONFIG_JS="${APP_DIR}/next.config.js"
+if [ -f "${NEXT_CONFIG_JS}" ] && grep -Eq 'module\.exports' "${NEXT_CONFIG_JS}"; then
+  mv "${APP_DIR}/next.config.js" "${APP_DIR}/next.config.cjs"
+  log "renamed CommonJS next.config.js → next.config.cjs (loads as CJS under the forced ESM app contract)"
 fi
 
 # ── 3b. TEMPORARY: apply the cloudflare/vinext#3197 overlay ───────────────────
