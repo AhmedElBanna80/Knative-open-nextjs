@@ -48,6 +48,7 @@
  */
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** `--flag value` pairs; no positional arguments. */
 function parseArgs(argv) {
@@ -72,16 +73,52 @@ if (!existsSync(ENTRY)) {
     process.exit(1);
 }
 
-/** Rewrites `import.meta.*` so `--bytecode`'s CommonJS output can hold it. */
+// The Bun.serve keep-alive guard, injected as the FIRST import of the nitro
+// entry so it patches `globalThis.Bun.serve` BEFORE srvx/bun calls it (ESM
+// evaluates a module's imports depth-first in source order, so the first import
+// runs first). This is how the mitigation reaches the COMPILED binary: a
+// `bun --preload` cannot touch a compiled executable, so the guard has to be in
+// the bundle. See bun-serve-keepalive-guard.mjs for the root cause (#silent-reset,
+// the Bun.serve sibling of the node-lane #188 reset). Resolved beside THIS file:
+// shipped as `.js` in dist, `.mjs` in the source tree (dev/tests) — try both.
+const compileHere = dirname(fileURLToPath(import.meta.url));
+const GUARD_FILE = [
+    join(compileHere, "bun-serve-keepalive-guard.js"),
+    join(compileHere, "bun-serve-keepalive-guard.mjs"),
+].find((c) => existsSync(c));
+if (!GUARD_FILE) {
+    // Fail CLOSED: the guard is load-bearing for the shipped artifact — a binary
+    // built without it reintroduces the silent-reset cluster on linux-x64.
+    console.error(
+        "[knext compile] the Bun.serve keep-alive guard is missing beside vinext-compile " +
+            `(looked for bun-serve-keepalive-guard.{js,mjs} in ${compileHere}) — refusing to ` +
+            "compile a binary that would reintroduce the keep-alive socket-reset cluster",
+    );
+    process.exit(1);
+}
+
+/**
+ * Injects the keep-alive guard import into the nitro entry AND rewrites
+ * `import.meta.*` so `--bytecode`'s CommonJS output can hold it. Both act on the
+ * SAME entry file, so they share one onLoad (Bun calls only the first plugin
+ * whose onLoad returns contents for a given path).
+ */
 const importMetaToCjs = {
-    name: "knext-import-meta-to-cjs",
+    name: "knext-entry-preamble-and-import-meta",
     setup(build) {
         build.onLoad({ filter: /\.m?js$/ }, async (args) => {
             if (resolve(args.path) !== ENTRY) return undefined;
-            const src = await Bun.file(args.path).text();
+            const raw = await Bun.file(args.path).text();
+            // Prepend the guard import FIRST, always — independent of whether the
+            // entry uses import.meta. `import "<abs>";` is bundled + evaluated
+            // before the rest of the entry's imports, patching Bun.serve in time.
+            const src = `import ${JSON.stringify(GUARD_FILE)};\n${raw}`;
+            console.log(
+                "[knext compile] injected the Bun.serve keep-alive guard as the entry's first import",
+            );
             const before = (src.match(/import\.meta\.(url|filename|dirname)/g) ?? [])
                 .length;
-            if (before === 0) return undefined;
+            if (before === 0) return { contents: src, loader: "js" };
             // These must reconstruct the ORIGINAL entry path
             // (<dirname(execPath)>/.output/server/index.mjs), NOT process.execPath
             // itself. nitro's bun preset resolves public assets as

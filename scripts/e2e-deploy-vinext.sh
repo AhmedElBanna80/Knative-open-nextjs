@@ -348,6 +348,32 @@ else
   log "KNEXT_COMPILE=0 — DIAGNOSTIC uncompiled boot: skipping the single-executable compile (§5) and sharp staging (§6); the UNCOMPILED nitro output will be booted under bun (partitions compile-step bugs from vite-pipeline/runtime bugs)"
 fi
 
+# ── 6b. resolve the Bun.serve keep-alive guard (BOTH boot paths load it) ───────
+# The vinext runtime serves via nitro's bun preset → srvx/bun → `Bun.serve`, and
+# Bun has a keep-alive socket-REUSE reset on that transport (the sibling of the
+# node lane's #188 node:http reset, measured still-present at Bun 1.4.2 on
+# linux-x64 — it dominates the ~79-fixture silent-reset cluster). The guard
+# stamps `Connection: close` on every response so a spec-honoring client never
+# reuses the socket and the race is unreachable. It ships in the installed
+# @getknext/core so this lane exercises the SAME artifact a user gets.
+#
+#   * COMPILED binary (§7 default): a `bun --preload` cannot reach a compiled
+#     executable, so vinext-compile.mjs BAKES the guard into the binary — it
+#     injects an `import` of this same file as the compiled entry's first
+#     statement. The guard is therefore already live inside ${KNEXT_EXEC}; the
+#     boot line needs nothing added.
+#   * UNCOMPILED boot (KNEXT_COMPILE=0): the nitro entry is booted directly, so
+#     the guard is loaded with `bun --preload` before the entry evaluates.
+#
+# Fail-closed: the shipped core MUST carry the guard on both paths — a boot that
+# silently dropped it would republish the reset cluster with every other gate
+# green.
+GUARD_PRELOAD="${APP_DIR}/node_modules/@getknext/core/dist/adapters/bun-serve-keepalive-guard.js"
+if [ ! -f "${GUARD_PRELOAD}" ]; then
+  log "ERROR: the installed @getknext/core ships no dist/adapters/bun-serve-keepalive-guard.js (${GUARD_PRELOAD}) — refusing to boot a vinext artifact without the keep-alive guard"
+  exit 1
+fi
+
 # ── 7. boot the artifact on a free port ───────────────────────────────────────
 # HOSTNAME is emptied rather than pinned (the node lane's B7a finding: a pinned
 # 127.0.0.1 misclassifies same-origin middleware rewrites as external).
@@ -359,7 +385,7 @@ PORT="$(free_port)"
 BUILD_ID="$(cat "${APP_DIR}/.next/BUILD_ID" 2>/dev/null || echo "${DEPLOYMENT_ID}")"
 
 if [ "${KNEXT_COMPILE}" != "0" ]; then
-  log "booting the compiled binary ${KNEXT_EXEC} on 0.0.0.0:${PORT}"
+  log "booting the compiled binary ${KNEXT_EXEC} on 0.0.0.0:${PORT} (keep-alive guard baked in by vinext-compile: ${GUARD_PRELOAD})"
   (
     cd "${APP_DIR}"
     PORT="${PORT}" HOSTNAME="" NODE_ENV="production" \
@@ -368,12 +394,12 @@ if [ "${KNEXT_COMPILE}" != "0" ]; then
   ) >"${SERVER_LOG}" 2>&1 &
   SERVER_PID=$!
 else
-  log "booting the UNCOMPILED vinext output ${NITRO_ENTRY} under bun on 0.0.0.0:${PORT}"
+  log "booting the UNCOMPILED vinext output ${NITRO_ENTRY} under bun on 0.0.0.0:${PORT} (keep-alive guard via --preload ${GUARD_PRELOAD})"
   (
     cd "${APP_DIR}"
     PORT="${PORT}" HOSTNAME="" NODE_ENV="production" \
       NEXT_DEPLOYMENT_ID="${DEPLOYMENT_ID}" \
-      exec bun "${NITRO_ENTRY}"
+      exec bun --preload "${GUARD_PRELOAD}" "${NITRO_ENTRY}"
   ) >"${SERVER_LOG}" 2>&1 &
   SERVER_PID=$!
 fi
