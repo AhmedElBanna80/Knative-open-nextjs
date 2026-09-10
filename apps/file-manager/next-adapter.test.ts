@@ -72,7 +72,7 @@ describe('next-adapter (POC-ADAPTER-P0 spike)', () => {
     } as any;
     const result = await adapter.modifyConfig!(baseConfig, {
       phase: 'phase-production-build',
-      nextVersion: '16.2.11',
+      nextVersion: '16.3.3',
     });
 
     expect(result.output).toBe('standalone');
@@ -88,7 +88,7 @@ describe('next-adapter (POC-ADAPTER-P0 spike)', () => {
     const baseConfig = { output: 'export' } as any;
     const result = await adapter.modifyConfig!(baseConfig, {
       phase: 'phase-development-server',
-      nextVersion: '16.2.11',
+      nextVersion: '16.3.3',
     });
 
     // Should return config unchanged (no output override outside build phase)
