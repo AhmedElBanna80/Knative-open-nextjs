@@ -422,6 +422,21 @@ describe('fixture normalization is EXPLICIT and bounded to the ESM app contract 
     // (4) The deploy script must NOT touch the shared corpus manifest — narrowing
     // it here would inflate the number while still looking like the node lane's.
     expect(e, 'the deploy script never references the corpus manifest').not.toMatch(/manifest/i);
+
+    // (5) EXACTLY ONE `mv` — the next.config.js → .cjs rename. #1042's review
+    // (both reviewers) flagged that `mv` is a NEW verb the deletion-shape scan
+    // above does not cover: `mv fixture/x.test.tsx /tmp` is a move-away deletion
+    // that evades every check here AND the single-rename count in the CJS-gate
+    // guard below. Bound the verb — the only move this script makes is the config
+    // rename — so a novel `mv` reds.
+    const moves = e.match(/\bmv\b/g) ?? [];
+    expect(moves.length, 'the only mv is the next.config.js → .cjs rename').toBe(1);
+    expect(e, 'the sole mv renames next.config.js → next.config.cjs, nothing else').toMatch(
+      /\bmv\b[^\n]*next\.config\.js[^\n]*next\.config\.cjs/,
+    );
+    expect(e, 'no mv of a .test/.spec file out of the fixture').not.toMatch(
+      /\bmv\b[^\n]*\.(test|spec)\b/,
+    );
   });
 });
 
@@ -488,15 +503,23 @@ describe('the lane resolves the deploy/build-time fixture failures it can (lane 
     );
   });
 
-  it('gates the next.config.js rename on a CJS marker — an ESM config is never renamed', () => {
+  it('gates the next.config.js rename on a CJS marker anchored at statement start, and excludes ESM configs', () => {
     // Unconditionally renaming would corrupt an ESM `next.config.js` (which loads
-    // fine under type:module). The rename must be guarded by a CommonJS marker
-    // (`module.exports`), so only a genuinely-CJS config is reconciled.
+    // fine under type:module). #1042's review (both reviewers) flagged that a bare
+    // `grep -Eq 'module\.exports'` false-positives on an ESM config that merely
+    // MENTIONS `module.exports` in a comment/string — it would be renamed to .cjs
+    // and then fail to load. The hardened gate (a) anchors `module.exports =` at
+    // statement start (a `//`-comment mention no longer matches) AND (b) negates
+    // on a top-level ESM `export`/`import` statement, so a genuinely-ESM file is
+    // never renamed even if it contains the literal.
     const e = executable();
     expect(
       e,
-      'the .cjs rename must be gated on a module.exports CJS marker, not applied blindly',
-    ).toMatch(/module\\?\.exports/);
+      'the CJS gate anchors module.exports at statement start (not a comment mention)',
+    ).toMatch(/\^\[\[:space:\]\]\*module\\?\.exports/);
+    expect(e, 'and excludes ESM configs via a negating export/import grep').toMatch(
+      /!\s*grep[^\n]*(?:export|import)/,
+    );
   });
 });
 

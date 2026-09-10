@@ -314,7 +314,13 @@ fi
 # file, touches no app/test source, and is GATED on a `module.exports` CJS marker so
 # an ESM `next.config.js` is never renamed.
 NEXT_CONFIG_JS="${APP_DIR}/next.config.js"
-if [ -f "${NEXT_CONFIG_JS}" ] && grep -Eq 'module\.exports' "${NEXT_CONFIG_JS}"; then
+# The CJS marker is anchored at statement start (`^[[:space:]]*module.exports =`)
+# so an ESM config that merely MENTIONS `module.exports` in a comment/string is not
+# matched, and the rename is skipped when the file carries a top-level ESM
+# `export`/`import` statement — a genuinely-ESM `next.config.js` is never renamed.
+if [ -f "${NEXT_CONFIG_JS}" ] \
+  && grep -Eq '^[[:space:]]*module\.exports[[:space:]]*=' "${NEXT_CONFIG_JS}" \
+  && ! grep -Eq '^[[:space:]]*(export[[:space:]]|export\{|import[[:space:]]|import\{)' "${NEXT_CONFIG_JS}"; then
   mv "${APP_DIR}/next.config.js" "${APP_DIR}/next.config.cjs"
   log "renamed CommonJS next.config.js → next.config.cjs (loads as CJS under the forced ESM app contract)"
 fi
