@@ -8,19 +8,19 @@
  *
  * Every failure was the identical `npm ERESOLVE`:
  *
- *   peer react@"^19.2.6" from vinext@1.0.0-beta.8
+ *   peer react@"^19.2.6" from vinext@1.0.0-beta.9
  *   Found: react@19.2.4
  *
  * `scripts/e2e-deploy-vinext.sh` pinned `react-server-dom-webpack@19.2.6` but not
  * `react`/`react-dom`; each corpus fixture pulls `react@19.2.4` transitively via
- * `next@16.2`, which does not satisfy vinext-beta.8's `react@^19.2.6` peer, so
+ * `next@16.2`, which does not satisfy vinext-beta.9's `react@^19.2.6` peer, so
  * `npm install` aborts before the fixture ever builds.
  *
  * ### Second edge (hidden behind the first)
  *
  * npm reports only ONE conflict edge at a time, so fixing the react family only
  * uncovered the next: the script pinned `@vitejs/plugin-rsc@0.5.26`, but
- * vinext-beta.8 declares `@vitejs/plugin-rsc@^0.5.34`. That peer is `optional`,
+ * vinext-beta.9 declares `@vitejs/plugin-rsc@^0.5.34`. That peer is `optional`,
  * but because the toolchain install pulls the package EXPLICITLY, npm enforces
  * the range anyway — so every fixture install still hard-failed on plugin-rsc.
  * Verified out-of-band: with `@vitejs/plugin-rsc@0.5.34` the full toolchain
@@ -37,7 +37,7 @@
  * ## What this guard asserts
  *
  * The single toolchain `npm install` must pin EVERY package that is also a vinext
- * peer at a version that SATISFIES vinext-beta.8's declared peer range. This is
+ * peer at a version that SATISFIES vinext-beta.9's declared peer range. This is
  * the real success condition — a future peer bump the script does not follow (as
  * plugin-rsc's `^0.5.34` was not) reds the guard, not just react drift. Plus the
  * React family stays coherent (all three move together) and the install never
@@ -58,12 +58,12 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEPLOY_SCRIPT = 'scripts/e2e-deploy-vinext.sh';
 
 /**
- * vinext@1.0.0-beta.8's declared `peerDependencies` (from `npm view vinext@…`),
+ * vinext@1.0.0-beta.9's declared `peerDependencies` (from `npm view vinext@…`),
  * restricted to the packages `e2e-deploy-vinext.sh` installs. When VINEXT_VERSION
  * bumps, re-run `npm view vinext@<v> peerDependencies` and update BOTH the ranges
  * and PEER_VINEXT_VERSION below.
  */
-const PEER_VINEXT_VERSION = '1.0.0-beta.8';
+const PEER_VINEXT_VERSION = '1.0.0-beta.9';
 const VINEXT_PEER_RANGES: Record<string, string> = {
   vite: '^8.0.0',
   react: '^19.2.6',
@@ -191,7 +191,7 @@ describe('the vinext toolchain install satisfies every vinext peer', () => {
       expect(version, `${pkg} is not pinned in the toolchain install`).toBeDefined();
       expect(
         caretSatisfies(version as string, range),
-        `${pkg}@${version} does NOT satisfy vinext-beta.8's peer ${pkg}@"${range}" — ` +
+        `${pkg}@${version} does NOT satisfy vinext-beta.9's peer ${pkg}@"${range}" — ` +
           'npm ERESOLVE will abort every fixture install before it can build',
       ).toBe(true);
     }
@@ -201,7 +201,7 @@ describe('the vinext toolchain install satisfies every vinext peer', () => {
     expect(
       pinnedVersion('react'),
       'react is unpinned — the corpus fixture pulls react@19.2.4 via next@16.2, ' +
-        'which does not satisfy vinext-beta.8’s react@^19.2.6 peer',
+        'which does not satisfy vinext-beta.9’s react@^19.2.6 peer',
     ).toBeDefined();
     expect(
       pinnedVersion('react-dom'),
