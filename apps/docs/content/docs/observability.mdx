@@ -45,7 +45,7 @@ The series the shipped scrape exposes:
 | Metric | Type | Meaning |
 |---|---|---|
 | `knext_bunexec_http_requests_total` | Counter | Requests served, labelled `status_class` (2xx/3xx/4xx/5xx) — request and error rate. |
-| `knext_bunexec_http_request_duration_seconds` | Histogram | Request latency (buckets down to 5 ms — cold starts are ~61 ms). |
+| `knext_bunexec_http_request_duration_seconds` | Histogram | Request latency (buckets down to 5 ms — process boot is ~61 ms). |
 | `knext_bunexec_http_inflight_requests` | Gauge | Current concurrency (saturation). |
 | `knext_bunexec_startup_duration_seconds` | Gauge | How long this pod took to become ready. |
 | `knext_bunexec_process_resident_memory_bytes` | Gauge | Resident set size. |
