@@ -10,6 +10,7 @@
     "github-action",
     "---Runtime---",
     "official-adapter",
+    "build-pipeline",
     "scale-to-zero",
     "warm-floors",
     "isr-caching",
