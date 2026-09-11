@@ -238,3 +238,52 @@ then, treat the always-on stance as load-bearing correctness, not a conservative
 
 Escape hatch: `KNEXT_BUN_KEEPALIVE_GUARD=0` disables the guard outright (one switch covers both
 the `node:http` and `Bun.serve` transports).
+
+## Amendment 5 — the cold-start premise is a process-boot metric, not the Knative scale-from-zero number (measured on OKE, 2026-09-09)
+
+This decision's headline justification — the **14.5× / 61 ms vs 884 ms cold-start win** in the table
+above — was measured as a **local process boot**: a fresh process on a fresh port, spawn → first
+response, warm page cache (the same "ten samples, fresh process and port" method the docs quote). It
+is a true and useful number for **what it measures** — the server's own boot cost, which the
+compiled single-exec slashes by precompiling the bundle to bytecode instead of parsing source at
+startup. It is **not** the cold start a user pays on Knative scale-from-zero, and the two differ by
+more than an order of magnitude.
+
+**Measured on a real cluster (OKE `me-abudhabi-1`, Knative Serving, N=7 paired/interleaved cold
+cycles per image, running config verified against intent — same app, two builds, byte-identical CRs
+except image + build type):**
+
+| target | Knative scale-from-zero (median, min–max, N=7) | image (compressed) |
+|---|---|---|
+| node-standalone (turbopack) | **3610 ms** (3143–3948) | 66.6 MiB |
+| vinext bun single-exec | **3401 ms** (3226–3761) | 42.9 MiB |
+
+**Statistically tied.** Bun is ~209 ms / ~6 % faster at the median, but the ranges fully overlap
+(bun 3226–3761, node 3143–3948) — run-to-run noise, not a decisive advantage. The Knative cold path
+(activator buffer → schedule → container create → boot → readiness) is ~3.4–3.6 s and **swamps**
+whatever process-boot delta drove the 61/884 numbers. Two corollaries, both measured:
+
+- The **local ~1.8 s binary-fault penalty** of the ~65 MB executable (a separate local finding that
+  had cast doubt on the compiled target) **did NOT reproduce on OKE** — the image is resident, and
+  the platform overhead hides it. On the deployment layer the single-exec is **cold-start-neutral**
+  vs node, not a regression and not a 14× win.
+- Bytecode caching moves cold start only ~14–16 ms locally (IO/scheduling-bound), consistent with
+  the older node-runtime finding.
+
+**Decision (accuracy, not reversal).** ADR-0048's choice of the single compiled target **stands** —
+this amendment does not reverse it. What it corrects is the **claim**: the product must not present
+61 ms as the cold start a user pays under scale-to-zero. The single-exec's real, defensible edges
+are a **smaller image** (42.9 vs 66.6 MiB), **faster warm-request latency/throughput**, a
+**single-artifact operational story**, and a genuinely faster **process boot** that pays off where
+platform overhead is small or removed (e.g. image prewarming, non-Knative hosts) — not a headline
+Knative cold-start win. User-facing cold-start optimization on Knative belongs at the **platform
+layer** (min-scale / activator capacity / image pre-pull / probe tuning), not the runtime. The user
+docs (`bun-runtime`, `scale-to-zero`, the landing page) are corrected in the same change to label
+the 61/884 figures as **process boot**, not scale-to-zero cold start.
+
+**Open, separate from this amendment:** whether ADR-0048's *single-target-only* rule still holds now
+that its headline premise is neutral rather than a 14× win is a **founder re-decision**, not
+something this amendment settles. node-standalone is cold-tied, ships 778/778 compat today, and
+carries no `#3197`-class dependency; the compiled target trades that for a smaller image + the
+warm-latency/ops edges above. Recorded here so the trade is legible; the decision above is unchanged
+until the founder revisits it.

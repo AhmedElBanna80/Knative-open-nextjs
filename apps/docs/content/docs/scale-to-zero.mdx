@@ -98,12 +98,20 @@ app.
 
 ## The cold-start budget
 
-A cold start is **pod scheduling + container start + the server boot + first-request work**. The
-boot is where a Next.js app spends real CPU compiling JavaScript — so knext attacks exactly that
-by compiling **at build time**: the default target is a [compiled single executable](/docs/bun-runtime)
-whose whole server bundle is precompiled to bytecode (measured **61 ms** median cold boot against
+A cold start is **pod scheduling + container start + the server boot + first-request work**. Only
+the last two are knext's to shave; the first two belong to the platform. The **boot** is where a
+Next.js app otherwise spends real CPU compiling JavaScript — so knext attacks exactly that by
+compiling **at build time**: the default target is a [compiled single executable](/docs/bun-runtime)
+whose whole server bundle is precompiled to bytecode (measured **61 ms** median process boot against
 the Node standalone's 884 ms); on the legacy Node standalone shape, a V8 compile cache baked into
 the image does the same job — see [bytecode caching](/docs/bytecode).
+
+Be clear about where that win lands, though: on a real Knative cluster the **pod scheduling and
+container start dominate** the end-to-end budget — measured on the order of ~3.4–3.6 s from zero
+replicas to first response, comparable across the compiled and Node targets, because the platform
+overhead swamps the boot delta. The boot optimization is real and cuts the part knext owns, but the
+largest lever on the total number is the platform tier — keeping a **warm window** after a burst
+(below), min-scale, activator capacity, image pre-pull, and probe tuning.
 
 
 

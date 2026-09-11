@@ -5,24 +5,35 @@ description: knext's default build compiles your app into a single executable �
 
 knext's default build does not ship a folder of JavaScript. It compiles your app into a **single
 executable**: the server bundle is minified, precompiled to bytecode ahead of time, and baked
-together with the Bun 1.4 runtime into one binary that the image runs directly. Under
-scale-to-zero your users pay the cold start, and this artifact is built for exactly that number.
+together with the Bun 1.4 runtime into one binary that the image runs directly. Precompiling to
+bytecode means the server **boots** in tens of milliseconds instead of parsing your source at
+startup — the boot phase where a Next.js app otherwise spends real CPU.
 
 ## The numbers
 
 All figures are the same app and the same route, responses verified byte-identical, ten samples
-each with a fresh process and port:
+each with a **fresh local process and port** — i.e. this measures the server's own **boot**, not
+an end-to-end deployment cold start:
 
-| Target | Cold start (median) | Requests/sec |
+| Target | Process boot (median) | Requests/sec |
 |---|---|---|
 | Node standalone | 884 ms | 630 |
 | Bun 1.4 standalone | 703 ms | 714 |
 | **Compiled executable (default)** | **61 ms** | **1103** |
 
-The compiled executable starts **14× faster** and serves **75% more** requests per second than the
+The compiled executable **boots** 14× faster and serves **75% more** requests per second than the
 Node standalone it replaces. It wins both axes at once because the whole bundle is compiled
 together: minification and bundling remove the per-module boundary cost that made earlier
 file-by-file bytecode approaches trade throughput for cold start.
+
+<Callout type="info">
+  These are **process-boot** numbers from a fresh local process. On Knative scale-from-zero the
+  end-to-end cold start a user pays is dominated by the platform — activation, scheduling, and
+  container start — which on a real cluster is measured comparable across targets, so the boot win
+  is one component of that budget rather than the whole of it. The compiled executable's boot
+  advantage pays off most where that platform overhead is small or pre-warmed. See
+  [Scale-to-zero & cold starts](/docs/scale-to-zero) for the full budget.
+</Callout>
 
 ## Nothing to configure
 
