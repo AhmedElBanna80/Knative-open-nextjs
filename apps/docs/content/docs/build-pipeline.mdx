@@ -1,0 +1,113 @@
+---
+title: How your app is built
+description: knext's default build compiles your Next.js app into a single self-contained executable through vinext — vite build, a nitro Bun bundle, then a bytecode-precompiled Bun binary.
+---
+
+When you run `kn-next build`, knext turns your Next.js app into **one self-contained executable**
+rather than a folder of JavaScript to be interpreted at boot. That binary — the server, every route
+it reaches, and the Bun runtime, compiled together — is what your image runs directly. This page
+explains the build target, the pipeline that produces it, and what your app has to satisfy to build
+on it.
+
+For the performance numbers and a plain description of the artifact, see
+[the compiled executable](/docs/bun-runtime). For how this relates to the official Next.js adapter,
+see [the adapter and the compiled build](/docs/official-adapter).
+
+## The build target
+
+The default — and only user-selectable — build target compiles your app with
+[**vinext**](https://vinext.dev), an open-source, Vite-based implementation of the Next.js
+framework, into a single executable. You do not have to configure anything to get it:
+
+```ts title="kn-next.config.ts"
+const config: KnativeNextConfig = {
+  name: 'acme',
+  registry: 'registry.example.com/acme',
+  // build: 'vinext' is the default — you can state it explicitly, but you don't need to
+};
+```
+
+The earlier target that emitted a `next build` standalone folder is **legacy**: existing standalone
+deployments keep working, but new builds produce the compiled executable. The `runtime` config
+field (`'bun'` / `'node'`) only affects that legacy standalone shape — for the compiled build the
+runtime is baked into the binary and there is nothing to select.
+
+## The pipeline
+
+`kn-next build` produces the executable in two stages:
+
+1. **`vite build`** — vinext compiles your app and emits a [nitro](https://nitro.build) server
+   bundle targeting the **Bun** preset (a `.output` directory whose entry is an ES module).
+2. **`bun build --compile --minify --bytecode`** — that bundle is minified, precompiled to
+   **bytecode** ahead of time, and baked together with the Bun runtime into one binary, cross-built
+   for the Linux target your image runs (musl by default, matching the shipped base image).
+
+Compiling the whole bundle at once is what lets the executable win **both** cold start and
+throughput at the same time: minification and bundling remove the per-module boundary cost that made
+earlier file-by-file bytecode approaches trade one for the other. The engine never parses your
+server source at boot — that work already happened at build time.
+
+The native image-optimization codec cannot live *inside* the binary, so knext ships it **beside**
+the executable in the image and loads it by path; `/_next/image` serves optimized AVIF/WebP exactly
+as it does on a folder deployment. See [image optimization](/docs/image-optimization).
+
+## Requirements
+
+### Your app must be an ES module
+
+vinext builds through Vite, whose server/client (RSC ↔ SSR) module graph requires your app to be an
+**ES module**. Set it in `package.json`:
+
+```json title="package.json"
+{
+  "type": "module"
+}
+```
+
+`kn-next create` sets this for you, so a freshly scaffolded app already satisfies it. It matters only
+when you point the compiled build at an **existing** app that was written as CommonJS. In that case:
+
+- add `"type": "module"` to `package.json`;
+- name your Next.js config `next.config.mjs` or `next.config.cjs` (a bare `next.config.js` is
+  interpreted as ESM once `"type": "module"` is set);
+- if the project still has CommonJS files that rely on `require()` or on a `.js` extension meaning
+  CommonJS, rename them to `.cjs` (or convert them to `import`/`export`).
+
+Without `"type": "module"`, the build fails while wiring up React Server Components — the
+server/client module graph cannot be resolved — rather than producing a broken binary. A CommonJS
+app is not supported on this target.
+
+### Building requires Bun 1.4 or newer
+
+The compile step shells out to `bun build --compile`, so the machine doing the build needs
+**Bun 1.4.0 or newer** on its `PATH`. (The `kn-next` CLI itself runs under plain Node; only this one
+step needs Bun.) The floor is enforced, not advisory: an older Bun cannot serve the compiled tree
+correctly, so the build refuses to run under it rather than quietly producing a binary that boots
+roughly twice as slowly. Upgrade with `bun upgrade`. If Bun is missing entirely the build stops and
+tells you how to install it.
+
+CI and container builds get Bun the same way; the requirement is only on whoever runs the build, not
+on anyone deploying an already-built image.
+
+## Compatibility, stated honestly
+
+knext's official-suite credential — [778/778, re-verified nightly](/docs/compat-suite) — was earned
+on the **Node standalone** lane, which is a *different artifact* from the compiled executable that
+ships today. The suite lane for the compiled executable is being stood up; until it publishes a
+green run, treat the compiled build's compatibility as **measured per feature rather than
+suite-verified**, and read the per-feature status on the
+[compatibility matrix](/docs/compat-matrix) rather than assuming the Node number carries over.
+
+The remaining gaps are largely a function of how far the underlying vinext framework has matured on
+areas such as streaming/Suspense flushing, Partial Prerendering, Cache Components (`'use cache'`),
+edge middleware, and internationalized routing. The matrix marks each honestly — ✅ only where a
+red-on-fail check backs it, ⚠️ where something is implemented but unguarded, and ❌/⛔ where it is a
+known or upstream-gated gap. Nothing there is papered over, and the first published suite number for
+the compiled build may be low — it gets published anyway.
+
+<Callout type="info">
+**Which page answers what.** This page covers *how* the build works and what it needs. For the
+measured cold-start and throughput numbers see [the compiled executable](/docs/bun-runtime); for
+what is and isn't verified see [verified compatibility](/docs/compat-suite) and the
+[compatibility matrix](/docs/compat-matrix).
+</Callout>
