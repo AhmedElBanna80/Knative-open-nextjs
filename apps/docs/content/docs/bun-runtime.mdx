@@ -110,7 +110,7 @@ rather than papered over.
 ## The standalone shape (legacy)
 
 Earlier knext versions ran the `next build` standalone folder under Node or Bun, with an optional
-per-file bytecode pass under `runtime: 'bun'`. That pass is retired: it improved cold start
+per-file bytecode pass under `runtime: 'bun'`. That pass is retired: it improved boot
 (554 ms vs 703 ms) but *reduced* throughput (537 req/s against Node's 630), because converting
 each module individually taxes every module boundary on every request. The compiled executable
 replaced it with whole-bundle compilation, which wins both dimensions. Existing standalone
