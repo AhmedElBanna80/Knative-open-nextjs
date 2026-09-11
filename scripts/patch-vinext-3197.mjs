@@ -43,7 +43,7 @@ import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 
 // The exact line vinext emits for the `ssr` build environment's entry input.
-// Unique in the beta.8 dist: it is the only `input: { index: … }` whose value is
+// Unique in the vinext dist: it is the only `input: { index: … }` whose value is
 // VIRTUAL_SERVER_ENTRY (the RSC/app/client environments use other constants).
 export const ANCHOR = 'input: { index: VIRTUAL_SERVER_ENTRY },';
 
